@@ -170,6 +170,19 @@ class CannyTests(unittest.TestCase):
 
 
 class DetectionTests(unittest.TestCase):
+    def test_matcher_uses_best_available_ground_truth(self) -> None:
+        ground_truth = [
+            Detection("image", "car", (0, 0, 10, 10)),
+            Detection("image", "car", (2, 0, 12, 10)),
+        ]
+        predictions = [
+            Detection("image", "car", (0, 0, 10, 10), score=0.9),
+            Detection("image", "car", (1, 0, 11, 10), score=0.8),
+        ]
+        summary, rows = evaluate_detections(predictions, ground_truth, classes=("car",))
+        self.assertEqual(rows[0]["recall_50"], 1.0)
+        self.assertEqual(summary["map_50"], 1.0)
+
     def test_instance_mask_to_boxes_uses_shared_classes(self) -> None:
         mask = np.zeros((6, 7), dtype=np.int32)
         mask[1:3, 2:5] = 26001  # car

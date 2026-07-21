@@ -14,6 +14,9 @@ from ..types import Detection
 from ..utils.dependencies import cv2_module
 
 
+DETECTION_EVALUATOR_VERSION = 2
+
+
 def _predict_kwargs(device: str | None, use_half: bool) -> dict[str, Any]:
     return {
         "device": device,
@@ -117,9 +120,14 @@ def _evaluate_detection_class(
             fp[index] = 1.0
             continue
         overlaps = np.asarray([bbox_iou(prediction.bbox, item.bbox) for item in candidates])
-        best_index = int(overlaps.argmax()) if overlaps.size else -1
+        # Match against the best *unused* ground truth. Selecting the global best
+        # first can incorrectly reject a valid match when that object was already
+        # claimed but another unused object still exceeds the IoU threshold.
+        available = ~used[prediction.image_id]
+        eligible_overlaps = np.where(available, overlaps, -1.0)
+        best_index = int(eligible_overlaps.argmax()) if overlaps.size and np.any(available) else -1
         best_iou = float(overlaps[best_index]) if best_index >= 0 else 0.0
-        if best_iou >= iou_threshold and not used[prediction.image_id][best_index]:
+        if best_iou >= iou_threshold:
             tp[index], used[prediction.image_id][best_index] = 1.0, True
             matched.append(best_iou)
         else:

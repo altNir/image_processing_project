@@ -13,6 +13,8 @@ import cityscapes_project.pipelines.parts34 as project
 from cityscapes_project.config import Parts34Config
 from cityscapes_project.methods.distortions import apply_aug, compute_snr
 from cityscapes_project.methods.restoration import restoration_parameters, restore_image
+from cityscapes_project.methods.quality import compute_mae, compute_psnr, compute_ssim
+from cityscapes_project.utils.statistics import paired_bootstrap
 from cityscapes_project.pipelines.parts34 import (
     PROJECT_CLASS_TO_ID,
     choose_training_condition,
@@ -64,6 +66,70 @@ class RestorationTests(unittest.TestCase):
                 self.assertGreater(
                     compute_snr(clean, restored), compute_snr(clean, distorted)
                 )
+
+    def test_gaussian_restoration_is_bounded_and_severity_aware(self) -> None:
+        mild = restore_image(self.image, "GaussNoise", 5.0)
+        severe = restore_image(self.image, "GaussNoise", 50.0)
+        mild_change = float(np.mean(np.abs(mild.astype(float) - self.image.astype(float))))
+        severe_change = float(np.mean(np.abs(severe.astype(float) - self.image.astype(float))))
+        self.assertGreater(severe_change, mild_change)
+
+    def test_jpeg_deblocking_targets_block_boundaries(self) -> None:
+        restored = restore_image(self.image, "SevereJPEG", 5.0)
+        change = np.mean(np.abs(restored.astype(float) - self.image.astype(float)), axis=2)
+        boundary = np.zeros(change.shape, dtype=bool)
+        boundary[:, 7:10] = True
+        boundary[:, 15:18] = True
+        boundary[:, 23:26] = True
+        boundary[:, 31:34] = True
+        boundary[:, 39:42] = True
+        boundary[:, 47:50] = True
+        boundary[:, 55:58] = True
+        boundary[7:10, :] = True
+        boundary[15:18, :] = True
+        boundary[23:26, :] = True
+        boundary[31:34, :] = True
+        boundary[39:42, :] = True
+        self.assertGreater(float(np.mean(change[boundary])), float(np.mean(change[~boundary])))
+
+    def test_regularized_motion_restoration_improves_structured_blur(self) -> None:
+        x = np.linspace(0, 255, 128, dtype=np.uint8)
+        clean = np.repeat(x[None, :, None], 64, axis=0)
+        clean = np.repeat(clean, 3, axis=2)
+        clean[12:52, 28:34] = 255
+        clean[18:45, 75:104] = 25
+        distorted = apply_aug(Image.fromarray(clean), "MotionBlur", 15.0)
+        restored = restore_image(distorted, "MotionBlur", 15.0)
+        self.assertGreater(compute_psnr(clean, restored), compute_psnr(clean, distorted))
+
+
+class QualityAndStatisticsTests(unittest.TestCase):
+    def test_reference_metrics_are_exact_for_identical_images(self) -> None:
+        image = np.full((20, 24, 3), 73, dtype=np.uint8)
+        self.assertTrue(np.isinf(compute_psnr(image, image)))
+        self.assertAlmostEqual(compute_ssim(image, image), 1.0)
+        self.assertEqual(compute_mae(image, image), 0.0)
+
+    def test_quality_metrics_order_degradation(self) -> None:
+        reference = np.tile(np.arange(64, dtype=np.uint8), (64, 1))
+        reference = np.repeat(reference[..., None], 3, axis=2)
+        mild = np.clip(reference.astype(int) + 3, 0, 255).astype(np.uint8)
+        severe = np.clip(reference.astype(int) + 20, 0, 255).astype(np.uint8)
+        self.assertGreater(compute_psnr(reference, mild), compute_psnr(reference, severe))
+        self.assertLess(compute_mae(reference, mild), compute_mae(reference, severe))
+
+    def test_paired_bootstrap_is_deterministic_and_orients_mae(self) -> None:
+        before = [10.0, 8.0, 12.0, 9.0]
+        after = [8.0, 7.0, 9.0, 9.0]
+        first = paired_bootstrap(
+            before, after, higher_is_better=False, resamples=200, seed=11
+        )
+        second = paired_bootstrap(
+            before, after, higher_is_better=False, resamples=200, seed=11
+        )
+        self.assertEqual(first, second)
+        self.assertGreater(first["mean_improvement"], 0.0)
+        self.assertEqual(first["win_rate"], 0.75)
 
 
 class YoloDatasetTests(unittest.TestCase):
@@ -200,6 +266,7 @@ class Part3OrchestrationTests(unittest.TestCase):
                 patch.object(project, "yolo_detections", side_effect=fake_yolo),
                 patch.object(project, "save_restoration_gallery"),
                 patch.object(project, "save_restoration_plot"),
+                patch.object(project, "save_restoration_quality_plot"),
             ):
                 result = project.run_part3(config, None, None, None, "cpu")
 
@@ -207,10 +274,13 @@ class Part3OrchestrationTests(unittest.TestCase):
             self.assertEqual(len(result["variants"]), 1)
             self.assertIn("seg_restored", result["variants"][0])
             self.assertIn("det_restored", result["variants"][0])
+            self.assertIn("psnr_gain_db", result["variants"][0])
             self.assertTrue((output / "part3" / "restoration_summary.json").is_file())
             self.assertTrue((output / "part3" / "restoration_per_image.csv").is_file())
             self.assertTrue((output / "part3" / "segmentation_per_class.csv").is_file())
             self.assertTrue((output / "part3" / "detection_per_class.csv").is_file())
+            self.assertTrue((output / "part3" / "paired_statistics.csv").is_file())
+            self.assertTrue((output / "part3" / "restoration_manifest.json").is_file())
 
 
 if __name__ == "__main__":

@@ -123,6 +123,8 @@ class Parts34Config:
     part4_clean_fraction: float = 0.20
     rebuild_training_data: bool = False
     reuse_part2_results: bool = True
+    part3_bootstrap_resamples: int = 1000
+    part3_confidence_level: float = 0.95
     fine_tuned_weights: Path | None = None
 
     def __post_init__(self) -> None:
@@ -143,6 +145,10 @@ class Parts34Config:
             raise ValueError("Part 4 batch must be positive or -1 for automatic sizing")
         if self.part4_workers < 0:
             raise ValueError("part4_workers must be non-negative")
+        if self.part3_bootstrap_resamples <= 0:
+            raise ValueError("part3_bootstrap_resamples must be positive")
+        if not 0.0 < self.part3_confidence_level < 1.0:
+            raise ValueError("part3_confidence_level must be between zero and one")
         if not 0 <= self.canny_low_threshold < self.canny_high_threshold:
             raise ValueError("Canny thresholds must satisfy 0 <= low < high")
         if self.canny_blur_kernel < 1 or self.canny_blur_kernel % 2 == 0:

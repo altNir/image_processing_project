@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import importlib.metadata
 import json
 import logging
 import math
+import platform
 import random
+import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -31,9 +35,20 @@ from cityscapes_project.methods.classical import (
     evaluate_canny_edges,
     measure_orb_matching,
 )
-from cityscapes_project.methods.detection import evaluate_detections, model_detections, yolo_detections
+from cityscapes_project.methods.detection import (
+    DETECTION_EVALUATOR_VERSION,
+    evaluate_detections,
+    model_detections,
+    yolo_detections,
+)
 from cityscapes_project.methods.distortions import apply_aug, compute_snr, stable_distortion_seed
-from cityscapes_project.methods.restoration import restore_image
+from cityscapes_project.methods.quality import compute_quality_metrics
+from cityscapes_project.methods.restoration import (
+    RESTORATION_METHODS,
+    RESTORATION_RECIPE_VERSION,
+    restoration_parameters,
+    restore_image_with_metadata,
+)
 from cityscapes_project.methods.segmentation import (
     SegmentationAccumulator,
     compute_ious,
@@ -41,15 +56,29 @@ from cityscapes_project.methods.segmentation import (
 )
 from cityscapes_project.types import Detection
 from cityscapes_project.utils.io import write_csv, write_json
+from cityscapes_project.utils.statistics import paired_bootstrap
 from cityscapes_project.utils.visualization import (
     save_fine_tuning_plot,
     save_restoration_gallery,
     save_restoration_plot,
+    save_restoration_quality_plot,
 )
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_CLASS_TO_ID = {name: index for index, name in enumerate(SHARED_DETECTION_CLASSES)}
 PROJECT_ID_TO_CLASS = {index: name for name, index in PROJECT_CLASS_TO_ID.items()}
+
+
+def _software_versions() -> dict[str, str]:
+    """Capture the runtime versions needed to reproduce numerical outputs."""
+
+    versions = {"python": sys.version.split()[0], "platform": platform.platform()}
+    for package in ("numpy", "Pillow", "opencv-python", "torch", "transformers", "ultralytics"):
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = "not-installed"
+    return versions
 
 
 def _mean(rows: Sequence[Mapping[str, Any]], key: str) -> float:
@@ -67,7 +96,12 @@ def _load_matching_part2_results(
     sample_ids: set[str],
     levels_by_name: Mapping[str, Sequence[float]],
 ) -> dict[str, Any] | None:
-    """Load complete Part 2 results only when they exactly match this Part 3 run."""
+    """Load expensive Part 2 baselines only after exact sample/variant validation.
+
+    Early project outputs predated completion metadata, so structural completeness
+    is accepted when every expected row and key is present. Detection is deliberately
+    not reused because Part 3 uses the corrected evaluator version.
+    """
 
     if not config.reuse_part2_results:
         return None
@@ -77,18 +111,25 @@ def _load_matching_part2_results(
         "per_image": part2 / "distorted_per_image.csv",
         "summary": part2 / "distorted_summary.csv",
         "segmentation": part2 / "segmentation_per_class.csv",
-        "detection": part2 / "detection_per_class.csv",
     }
     if not all(path.is_file() for path in required.values()):
         return None
     metadata = json.loads(required["json"].read_text(encoding="utf-8"))
     expected_variants = sum(len(levels) for levels in levels_by_name.values())
+    expected_levels = {name: [float(level) for level in levels] for name, levels in levels_by_name.items()}
+    recorded_levels = metadata.get("distortion_levels")
     if (
-        not metadata.get("complete")
+        metadata.get("complete") is False
         or int(metadata.get("sample_count", -1)) != len(sample_ids)
-        or int(metadata.get("completed_variants", -1)) != expected_variants
-        or metadata.get("distortion_levels")
-        != {name: list(levels) for name, levels in levels_by_name.items()}
+        or (
+            "completed_variants" in metadata
+            and int(metadata["completed_variants"]) != expected_variants
+        )
+        or (
+            recorded_levels is not None
+            and {name: [float(level) for level in levels] for name, levels in recorded_levels.items()}
+            != expected_levels
+        )
     ):
         LOGGER.warning("Part 2 outputs exist but do not match this Part 3 configuration")
         return None
@@ -98,17 +139,42 @@ def _load_matching_part2_results(
         return None
     if {row["sample_id"] for row in per_image} != sample_ids:
         return None
+    summary_rows = _read_csv_rows(required["summary"])
+    expected_keys = {
+        (name, index) for name, levels in levels_by_name.items() for index in range(len(levels))
+    }
+    summary_by_key = {
+        (row["distortion"], int(row["level_index"])): row for row in summary_rows
+    }
+    if len(summary_rows) != expected_variants or set(summary_by_key) != expected_keys:
+        return None
+    for name, index in expected_keys:
+        if float(summary_by_key[(name, index)]["level"]) != float(levels_by_name[name][index]):
+            return None
+    segmentation_rows = _read_csv_rows(required["segmentation"])
+    segmentation_keys = {
+        (row["distortion"], float(row["level"])) for row in segmentation_rows
+    }
+    expected_level_keys = {
+        (name, float(level)) for name, levels in levels_by_name.items() for level in levels
+    }
+    if not expected_level_keys.issubset(segmentation_keys):
+        return None
     return {
         "per_image": {
             (row["sample_id"], row["distortion"], int(row["level_index"])): row
             for row in per_image
         },
-        "summary": {
-            (row["distortion"], int(row["level_index"])): row
-            for row in _read_csv_rows(required["summary"])
+        "summary": summary_by_key,
+        "segmentation": segmentation_rows,
+        "provenance": {
+            "source": str(part2),
+            "legacy_completion_inferred": "complete" not in metadata,
+            "reused_metrics": ["orb_match_retention", "canny_f1", "segmentation"],
+            "recomputed_metrics": [
+                "snr", "psnr", "ssim", "mae", "detection"
+            ],
         },
-        "segmentation": _read_csv_rows(required["segmentation"]),
-        "detection": _read_csv_rows(required["detection"]),
     }
 
 
@@ -119,7 +185,7 @@ def run_part3(
     segmenter: Any,
     device: str,
 ) -> dict[str, Any]:
-    """Evaluate all four methods before and after restoration."""
+    """Run a paired, severity-aware, auditable restoration evaluation."""
 
     samples = discover_cityscapes_samples(
         config.dataset_root, config.split, config.max_samples, config.seed
@@ -130,6 +196,7 @@ def run_part3(
     summaries: list[dict[str, Any]] = []
     seg_class_rows: list[dict[str, Any]] = []
     det_class_rows: list[dict[str, Any]] = []
+    statistical_rows: list[dict[str, Any]] = []
     gallery: list[dict[str, Any]] = []
     total = sum(len(levels) for levels in levels_by_name.values())
     part2_cache = _load_matching_part2_results(
@@ -164,9 +231,16 @@ def run_part3(
                     config.seed, sample.sample_id, distortion_name, level_index
                 )
                 distorted_rgb = apply_aug(clean_image, distortion_name, float(level), seed=seed)
-                restored_rgb = restore_image(distorted_rgb, distortion_name, float(level))
+                restoration_started = time.perf_counter()
+                restored_rgb, restoration_metadata = restore_image_with_metadata(
+                    distorted_rgb, distortion_name, float(level)
+                )
+                restoration_ms = 1000.0 * (time.perf_counter() - restoration_started)
                 distorted = Image.fromarray(distorted_rgb)
                 restored = Image.fromarray(restored_rgb)
+
+                distorted_quality = compute_quality_metrics(clean_rgb, distorted_rgb)
+                restored_quality = compute_quality_metrics(clean_rgb, restored_rgb)
 
                 clean_edges = canny_detect(
                     clean_image, config.canny_low_threshold,
@@ -193,6 +267,14 @@ def run_part3(
                 pred_rest.extend(detections_rest)
                 ground_truth.extend(gt)
 
+                # Detection is always recomputed so both conditions use evaluator
+                # version 2, even when costly Part 2 segmentation/classical rows are reused.
+                detections_dist = yolo_detections(
+                    distorted, detector, sample.sample_id,
+                    config.yolo_eval_confidence, device, config.use_half,
+                )
+                pred_dist.extend(detections_dist)
+
                 rest_ious = compute_ious(segmentation_rest, label)
                 if part2_cache is None:
                     distorted_edges = canny_detect(
@@ -208,42 +290,51 @@ def run_part3(
                     )
                     assert seg_dist is not None
                     seg_dist.update(segmentation_dist, label)
-                    detections_dist = yolo_detections(
-                        distorted, detector, sample.sample_id,
-                        config.yolo_eval_confidence, device, config.use_half,
-                    )
-                    pred_dist.extend(detections_dist)
                     dist_ious = compute_ious(segmentation_dist, label)
                     distorted_values = {
-                        "distorted_snr_db": compute_snr(clean_rgb, distorted_rgb),
                         "orb_distorted": orb_dist["match_retention"],
                         "canny_distorted": canny_dist["f1"],
                         "seg_distorted_image_miou": (
                             float(np.mean(list(dist_ious.values()))) if dist_ious else 0.0
                         ),
-                        "detections_distorted": len(detections_dist),
                     }
                 else:
                     cached = part2_cache["per_image"][(
                         sample.sample_id, distortion_name, level_index
                     )]
                     distorted_values = {
-                        "distorted_snr_db": float(cached["snr_db"]),
                         "orb_distorted": float(cached["orb_match_retention"]),
                         "canny_distorted": float(cached["canny_f1"]),
                         "seg_distorted_image_miou": float(cached["seg_mean_iou"]),
-                        "detections_distorted": int(cached["yolo_detection_objects"]),
                     }
                 row = {
                     "sample_id": sample.sample_id,
                     "distortion": distortion_name,
                     "level_index": level_index,
                     "level": float(level),
-                    "restored_snr_db": compute_snr(clean_rgb, restored_rgb),
+                    "restoration_recipe_version": RESTORATION_RECIPE_VERSION,
+                    "restoration_method": restoration_metadata["method"],
+                    "restoration_parameters": json.dumps(
+                        restoration_metadata["parameters"], sort_keys=True
+                    ),
+                    "restoration_runtime_ms": restoration_ms,
+                    "distorted_snr_db": distorted_quality["snr_db"],
+                    "restored_snr_db": restored_quality["snr_db"],
+                    "snr_gain_db": restored_quality["snr_db"] - distorted_quality["snr_db"],
+                    "distorted_psnr_db": distorted_quality["psnr_db"],
+                    "restored_psnr_db": restored_quality["psnr_db"],
+                    "psnr_gain_db": restored_quality["psnr_db"] - distorted_quality["psnr_db"],
+                    "distorted_ssim": distorted_quality["ssim"],
+                    "restored_ssim": restored_quality["ssim"],
+                    "ssim_gain": restored_quality["ssim"] - distorted_quality["ssim"],
+                    "distorted_mae": distorted_quality["mae"],
+                    "restored_mae": restored_quality["mae"],
+                    "mae_reduction": distorted_quality["mae"] - restored_quality["mae"],
                     "orb_restored": orb_rest["match_retention"],
                     "canny_restored": canny_rest["f1"],
                     "seg_restored_image_miou": float(np.mean(list(rest_ious.values()))) if rest_ious else 0.0,
                     "detections_restored": len(detections_rest),
+                    "detections_distorted": len(detections_dist),
                     **distorted_values,
                 }
                 per_image.append(row)
@@ -255,6 +346,10 @@ def run_part3(
                         "level": float(level),
                         "distorted_snr": row["distorted_snr_db"],
                         "restored_snr": row["restored_snr_db"],
+                        "distorted_psnr": row["distorted_psnr_db"],
+                        "restored_psnr": row["restored_psnr_db"],
+                        "distorted_ssim": row["distorted_ssim"],
+                        "restored_ssim": row["restored_ssim"],
                         "clean": clean_rgb,
                         "distorted": distorted_rgb,
                         "restored": restored_rgb,
@@ -262,23 +357,16 @@ def run_part3(
 
             seg_rest_summary, seg_rest_classes = seg_rest.results()
             det_rest_summary, det_rest_classes = evaluate_detections(pred_rest, ground_truth)
+            det_dist_summary, det_dist_classes = evaluate_detections(pred_dist, ground_truth)
             if part2_cache is None:
                 assert seg_dist is not None
                 seg_dist_summary, seg_dist_classes = seg_dist.results()
-                det_dist_summary, det_dist_classes = evaluate_detections(pred_dist, ground_truth)
             else:
                 cached_summary = part2_cache["summary"][(distortion_name, level_index)]
                 seg_dist_summary = {"mean_iou": float(cached_summary["seg_mean_iou"])}
-                det_dist_summary = {"map_50_95": float(cached_summary["det_map_50_95"])}
                 seg_dist_classes = [
                     {key: value for key, value in row.items() if key not in {"distortion", "level"}}
                     for row in part2_cache["segmentation"]
-                    if row["distortion"] == distortion_name
-                    and float(row["level"]) == float(level)
-                ]
-                det_dist_classes = [
-                    {key: value for key, value in row.items() if key not in {"distortion", "level"}}
-                    for row in part2_cache["detection"]
                     if row["distortion"] == distortion_name
                     and float(row["level"]) == float(level)
                 ]
@@ -287,19 +375,75 @@ def run_part3(
                 "level_index": level_index,
                 "level": float(level),
                 "sample_count": len(variant_rows),
+                "restoration_recipe_version": RESTORATION_RECIPE_VERSION,
+                "restoration_method": restoration_metadata["method"],
+                "restoration_parameters": json.dumps(
+                    restoration_metadata["parameters"], sort_keys=True
+                ),
+                "mean_restoration_runtime_ms": _mean(variant_rows, "restoration_runtime_ms"),
                 "distorted_mean_snr_db": _mean(variant_rows, "distorted_snr_db"),
                 "restored_mean_snr_db": _mean(variant_rows, "restored_snr_db"),
-                "snr_gain_db": _mean(variant_rows, "restored_snr_db") - _mean(variant_rows, "distorted_snr_db"),
+                "snr_gain_db": _mean(variant_rows, "restored_snr_db")
+                - _mean(variant_rows, "distorted_snr_db"),
+                "distorted_mean_psnr_db": _mean(variant_rows, "distorted_psnr_db"),
+                "restored_mean_psnr_db": _mean(variant_rows, "restored_psnr_db"),
+                "psnr_gain_db": _mean(variant_rows, "restored_psnr_db")
+                - _mean(variant_rows, "distorted_psnr_db"),
+                "distorted_mean_ssim": _mean(variant_rows, "distorted_ssim"),
+                "restored_mean_ssim": _mean(variant_rows, "restored_ssim"),
+                "ssim_gain": _mean(variant_rows, "restored_ssim") - _mean(variant_rows, "distorted_ssim"),
+                "distorted_mean_mae": _mean(variant_rows, "distorted_mae"),
+                "restored_mean_mae": _mean(variant_rows, "restored_mae"),
+                "mae_reduction": _mean(variant_rows, "distorted_mae") - _mean(variant_rows, "restored_mae"),
                 "orb_distorted": _mean(variant_rows, "orb_distorted"),
                 "orb_restored": _mean(variant_rows, "orb_restored"),
+                "orb_gain": _mean(variant_rows, "orb_restored") - _mean(variant_rows, "orb_distorted"),
                 "canny_distorted": _mean(variant_rows, "canny_distorted"),
                 "canny_restored": _mean(variant_rows, "canny_restored"),
+                "canny_gain": _mean(variant_rows, "canny_restored") - _mean(variant_rows, "canny_distorted"),
                 "seg_distorted": seg_dist_summary["mean_iou"],
                 "seg_restored": seg_rest_summary["mean_iou"],
+                "seg_gain": seg_rest_summary["mean_iou"] - seg_dist_summary["mean_iou"],
                 "det_distorted": det_dist_summary["map_50_95"],
                 "det_restored": det_rest_summary["map_50_95"],
+                "det_gain": det_rest_summary["map_50_95"] - det_dist_summary["map_50_95"],
             }
             summaries.append(summary)
+
+            statistical_metrics = (
+                ("snr_db", "distorted_snr_db", "restored_snr_db", True),
+                ("psnr_db", "distorted_psnr_db", "restored_psnr_db", True),
+                ("ssim", "distorted_ssim", "restored_ssim", True),
+                ("mae", "distorted_mae", "restored_mae", False),
+                ("orb_match_retention", "orb_distorted", "orb_restored", True),
+                ("canny_f1", "canny_distorted", "canny_restored", True),
+                (
+                    "segmentation_image_miou",
+                    "seg_distorted_image_miou",
+                    "seg_restored_image_miou",
+                    True,
+                ),
+            )
+            for metric_index, (
+                metric, before_key, after_key, higher_is_better
+            ) in enumerate(statistical_metrics):
+                statistics = paired_bootstrap(
+                    [float(row[before_key]) for row in variant_rows],
+                    [float(row[after_key]) for row in variant_rows],
+                    higher_is_better=higher_is_better,
+                    resamples=config.part3_bootstrap_resamples,
+                    confidence_level=config.part3_confidence_level,
+                    seed=config.seed + variant_number * 100 + metric_index,
+                )
+                statistical_rows.append({
+                    "distortion": distortion_name,
+                    "level_index": level_index,
+                    "level": float(level),
+                    "metric": metric,
+                    "confidence_level": config.part3_confidence_level,
+                    "bootstrap_resamples": config.part3_bootstrap_resamples,
+                    **statistics,
+                })
             for condition, rows in (("distorted", seg_dist_classes), ("restored", seg_rest_classes)):
                 seg_class_rows.extend(
                     {"distortion": distortion_name, "level": float(level), "condition": condition, **row}
@@ -316,6 +460,7 @@ def run_part3(
             write_csv(output / "restoration_summary.csv", summaries)
             write_csv(output / "segmentation_per_class.csv", seg_class_rows)
             write_csv(output / "detection_per_class.csv", det_class_rows)
+            write_csv(output / "paired_statistics.csv", statistical_rows)
             write_json(output / "restoration_summary.json", {
                 "scope": "Part 3 - restored images",
                 "complete": False,
@@ -323,6 +468,14 @@ def run_part3(
                 "total_variants": total,
                 "sample_count": len(samples),
                 "reused_part2_results": part2_cache is not None,
+                "part2_cache_provenance": part2_cache["provenance"] if part2_cache else None,
+                "restoration_recipe_version": RESTORATION_RECIPE_VERSION,
+                "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
+                "statistical_protocol": {
+                    "design": "paired by Cityscapes sample",
+                    "bootstrap_resamples": config.part3_bootstrap_resamples,
+                    "confidence_level": config.part3_confidence_level,
+                },
                 "distortion_levels": levels_by_name,
                 "variants": summaries,
             })
@@ -331,6 +484,7 @@ def run_part3(
     write_csv(output / "restoration_summary.csv", summaries)
     write_csv(output / "segmentation_per_class.csv", seg_class_rows)
     write_csv(output / "detection_per_class.csv", det_class_rows)
+    write_csv(output / "paired_statistics.csv", statistical_rows)
     write_json(output / "restoration_summary.json", {
         "scope": "Part 3 - restored images",
         "complete": True,
@@ -338,14 +492,73 @@ def run_part3(
         "total_variants": total,
         "sample_count": len(samples),
         "reused_part2_results": part2_cache is not None,
+        "part2_cache_provenance": part2_cache["provenance"] if part2_cache else None,
+        "restoration_recipe_version": RESTORATION_RECIPE_VERSION,
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
+        "statistical_protocol": {
+            "design": "paired by Cityscapes sample",
+            "bootstrap_resamples": config.part3_bootstrap_resamples,
+            "confidence_level": config.part3_confidence_level,
+        },
         "distortion_levels": levels_by_name,
         "variants": summaries,
     })
+    write_json(output / "restoration_manifest.json", {
+        "scope": "Part 3 restoration methodology and reproducibility manifest",
+        "recipe_version": RESTORATION_RECIPE_VERSION,
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
+        "dataset_root": str(config.dataset_root.resolve()),
+        "seed": config.seed,
+        "split": config.split,
+        "sample_count": len(samples),
+        "sample_ids": [sample.sample_id for sample in samples],
+        "distortion_levels": levels_by_name,
+        "distortion_seed_rule": "FNV-1a seed from run seed, sample ID, distortion, and level index",
+        "models": {
+            "detection": config.yolo_model,
+            "segmentation": config.segformer_model,
+            "yolo_evaluation_confidence": config.yolo_eval_confidence,
+        },
+        "execution": {
+            "device": device,
+            "half_precision_requested": config.use_half,
+            "software_versions": _software_versions(),
+        },
+        "methods": RESTORATION_METHODS,
+        "parameters_by_variant": [
+            {
+                "distortion": name,
+                "level_index": index,
+                "level": float(level),
+                "parameters": restoration_parameters(name, float(level)),
+            }
+            for name, levels in levels_by_name.items()
+            for index, level in enumerate(levels)
+        ],
+        "part2_cache_provenance": part2_cache["provenance"] if part2_cache else None,
+        "statistical_protocol": {
+            "paired_unit": "Cityscapes image",
+            "interval": "percentile bootstrap of paired mean improvement",
+            "bootstrap_resamples": config.part3_bootstrap_resamples,
+            "confidence_level": config.part3_confidence_level,
+            "non_finite_pairs": "excluded per metric",
+            "positive_delta": "improvement (MAE sign is inverted)",
+        },
+        "quality_metric_protocol": {
+            "snr": "RGB signal power divided by RGB error power, in dB",
+            "psnr": "RGB MSE with 8-bit peak value, in dB",
+            "ssim": "luminance SSIM, 11x11 Gaussian window, sigma 1.5",
+            "mae": "mean absolute RGB error in 0-255 intensity units",
+        },
+    })
     save_restoration_gallery(gallery, output / "figures" / "restoration_grid.png")
     save_restoration_plot(summaries, output / "figures" / "restored_performance.png")
+    save_restoration_quality_plot(summaries, output / "figures" / "restoration_quality.png")
     return {
         "sample_count": len(samples),
         "reused_part2_results": part2_cache is not None,
+        "restoration_recipe_version": RESTORATION_RECIPE_VERSION,
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
         "variants": summaries,
     }
 
@@ -629,6 +842,7 @@ def evaluate_fine_tuned_yolo(
         write_csv(config.output_dir / "part4" / "detection_per_class.csv", class_rows)
         write_json(config.output_dir / "part4" / "fine_tuning_summary.json", {
             "scope": "Part 4 - YOLO fine-tuning on distorted images",
+            "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
             "complete": False,
             "completed_conditions": len(summaries),
             "total_conditions": len(conditions),
@@ -641,6 +855,7 @@ def evaluate_fine_tuned_yolo(
     write_csv(output / "detection_per_class.csv", class_rows)
     write_json(output / "fine_tuning_summary.json", {
         "scope": "Part 4 - YOLO fine-tuning on distorted images",
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
         "complete": True,
         "completed_conditions": len(summaries),
         "total_conditions": len(conditions),
@@ -648,7 +863,11 @@ def evaluate_fine_tuned_yolo(
         "variants": summaries,
     })
     save_fine_tuning_plot(summaries, output / "figures" / "fine_tuning_per_snr.png")
-    return {"sample_count": len(samples), "variants": summaries}
+    return {
+        "sample_count": len(samples),
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
+        "variants": summaries,
+    }
 
 
 def run_part4(config: Parts34Config, device: str) -> dict[str, Any]:

@@ -57,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--part4-workers", type=int, default=4)
     parser.add_argument("--part4-clean-fraction", type=float, default=0.20)
     parser.add_argument("--rebuild-training-data", action="store_true")
+    parser.add_argument("--part3-bootstrap-resamples", type=int, default=1000)
+    parser.add_argument("--part3-confidence-level", type=float, default=0.95)
     parser.add_argument(
         "--no-reuse-part2",
         action="store_true",
@@ -112,6 +114,8 @@ def _parts34_config(
         part4_clean_fraction=args.part4_clean_fraction,
         rebuild_training_data=args.rebuild_training_data,
         reuse_part2_results=not args.no_reuse_part2,
+        part3_bootstrap_resamples=args.part3_bootstrap_resamples,
+        part3_confidence_level=args.part3_confidence_level,
         fine_tuned_weights=args.fine_tuned_weights,
     )
 

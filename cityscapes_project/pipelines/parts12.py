@@ -25,7 +25,12 @@ from cityscapes_project.methods.classical import (
     measure_orb_matching,
     orb_overlay,
 )
-from cityscapes_project.methods.detection import evaluate_detections, yolo_detections, yolo_overlay
+from cityscapes_project.methods.detection import (
+    DETECTION_EVALUATOR_VERSION,
+    evaluate_detections,
+    yolo_detections,
+    yolo_overlay,
+)
 from cityscapes_project.methods.distortions import apply_aug, compute_snr, stable_distortion_seed
 from cityscapes_project.methods.segmentation import (
     SegmentationAccumulator,
@@ -160,6 +165,7 @@ def run_part1(
     detection_summary, detection_per_class = evaluate_detections(all_predictions, all_ground_truth)
     summary = {
         "scope": "Part 1 - clean images",
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
         "sample_count": len(samples),
         "split": config.split,
         "segmentation": segmentation_summary,
@@ -372,6 +378,7 @@ def run_part2(
                 "total_variants": total_variants,
                 "sample_count": len(references),
                 "distortion_levels": distortion_levels,
+                "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
                 "variants": summary_rows,
             })
 
@@ -386,6 +393,7 @@ def run_part2(
         "total_variants": total_variants,
         "sample_count": len(references),
         "distortion_levels": distortion_levels,
+        "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
         "variants": summary_rows,
     })
     save_performance_snr_plot(summary_rows, output_dir / "figures" / "performance_per_snr.png")

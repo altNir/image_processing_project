@@ -184,7 +184,8 @@ def save_restoration_gallery(rows: Sequence[Mapping[str, Any]], path: Path) -> N
             axes[index, column].axis("off")
         axes[index, 0].set_ylabel(
             f"{row['distortion']}\nlevel={row['level']:g}\n"
-            f"{row['distorted_snr']:.1f}->{row['restored_snr']:.1f} dB"
+            f"PSNR {row['distorted_psnr']:.1f}->{row['restored_psnr']:.1f} dB\n"
+            f"SSIM {row['distorted_ssim']:.3f}->{row['restored_ssim']:.3f}"
         )
     figure.suptitle("Part 3 - clean, distorted, and restored images", fontsize=16)
     figure.tight_layout()
@@ -219,6 +220,43 @@ def save_restoration_plot(rows: Sequence[Mapping[str, Any]], path: Path) -> None
         axis.grid(alpha=0.3)
         axis.legend(fontsize=7, ncol=2)
     figure.suptitle("Part 3 - distorted versus restored performance", fontsize=16)
+    figure.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=160, bbox_inches="tight")
+    plt.close(figure)
+
+
+def save_restoration_quality_plot(rows: Sequence[Mapping[str, Any]], path: Path) -> None:
+    """Plot full-reference fidelity and restoration runtime by severity."""
+
+    if not rows:
+        return
+    plt = matplotlib_pyplot()
+    figure, axes = plt.subplots(2, 2, figsize=(14, 10))
+    metrics = (
+        ("psnr_gain_db", "PSNR gain (dB)"),
+        ("ssim_gain", "SSIM gain"),
+        ("mae_reduction", "MAE reduction (intensity levels)"),
+        ("mean_restoration_runtime_ms", "Restoration time per image (ms)"),
+    )
+    distortions = sorted({str(row["distortion"]) for row in rows})
+    for axis, (metric, title) in zip(axes.ravel(), metrics):
+        for distortion in distortions:
+            selected = [row for row in rows if row["distortion"] == distortion]
+            selected.sort(key=lambda row: int(row["level_index"]))
+            axis.plot(
+                [int(row["level_index"]) + 1 for row in selected],
+                [float(row[metric]) for row in selected],
+                "-o",
+                label=distortion,
+            )
+        if metric != "mean_restoration_runtime_ms":
+            axis.axhline(0.0, color="black", linewidth=0.8, alpha=0.5)
+        axis.set_xlabel("Severity index (1=mild, 5=severe)")
+        axis.set_ylabel(title)
+        axis.grid(alpha=0.3)
+        axis.legend(fontsize=8)
+    figure.suptitle("Part 3 - restoration fidelity gains and computational cost", fontsize=16)
     figure.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=160, bbox_inches="tight")

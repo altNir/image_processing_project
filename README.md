@@ -1,237 +1,215 @@
-# Cityscapes Vision Robustness Project - Parts 1-4
+# Cityscapes Vision Robustness Project
 
-This project evaluates computer-vision methods on clean and distorted Cityscapes images, restores the distorted images, and fine-tunes a detector for improved distortion robustness. The implementation follows the course-slide pipeline and helper style (`overlay_mask`, `orb_overlay`, `yolo_overlay`, `predict_segmentation`, `compute_ious`, `apply_aug`, and `compute_snr`) while adapting it to Cityscapes annotations.
+This class project measures how common vision methods behave on clean and degraded street scenes, whether classical restoration recovers performance, and whether distortion-aware detector training improves robustness. It follows the function style used in the course slides while using Cityscapes semantic and instance annotations for quantitative evaluation.
 
-## Project design
+## Project stages and numbered parts
 
-| Part | Work performed |
-|---|---|
-| Part 1 | Evaluate ORB, Canny, pretrained YOLOv8n, and Cityscapes SegFormer-B0 on clean images |
-| Part 2 | Apply Gaussian noise, JPEG compression, low light, and motion blur at five levels; rerun and evaluate all methods |
-| Part 3 | Restore every distorted image with a distortion-specific enhancement method; compare distorted versus restored results |
-| Part 4 | Build a mixed clean/distorted Cityscapes detection set, fine-tune YOLO, and compare pretrained versus fine-tuned detection |
+The work has three main stages containing four numbered implementation parts:
 
-The additional Canny method and motion-blur distortion are Arik's changes and are part of the final project direction.
+| Stage | Course part | What it does |
+|---|---:|---|
+| Clean baselines | Part 1 | Runs ORB, Canny, pretrained YOLOv8n, and Cityscapes SegFormer-B0 on clean validation images |
+| Degradation and recovery | Parts 2–3 | Applies four controlled distortions, measures robustness, restores each image, and measures recovery |
+| Robust adaptation | Part 4 | Builds a mixed clean/distorted Cityscapes detection set, fine-tunes YOLO, and compares it with the pretrained detector |
 
-### Tasks and metrics
+Canny and motion blur are the additional methods chosen for the three-person project direction.
 
-| Task | Method | Main metrics |
+## Tasks and evaluation metrics
+
+| Vision task | Method | Metrics |
 |---|---|---|
-| Local feature detection/matching | ORB | keypoint retention, spatial match retention, inlier ratio |
+| Local features | ORB | keypoint retention, spatial match retention, inlier ratio |
 | Edge detection | Canny | edge-pixel retention, tolerant precision, recall, F1 |
 | Semantic segmentation | SegFormer-B0 | per-class IoU, mean IoU, pixel accuracy, mean class accuracy |
-| Object detection | YOLOv8n | per-class AP@0.50, mAP@0.50:0.95, precision, recall, matched-box IoU |
-| Image quality | SNR | SNR in dB before and after restoration |
+| Object detection | YOLOv8n | AP@0.50, mAP@0.50:0.95, precision, recall, matched-box IoU |
+| Image quality | SNR | signal-to-noise ratio in dB before and after restoration |
 
-Cityscapes instance masks are converted to real object-detection ground-truth boxes. The evaluated classes shared directly by Cityscapes and COCO are `person`, `bicycle`, `car`, `motorcycle`, `bus`, `train`, and `truck`. Cityscapes `rider` is excluded because COCO has no equivalent class.
+Cityscapes instance masks are converted to object boxes. Evaluation uses the seven direct Cityscapes/COCO matches: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `train`, and `truck`. `rider` is excluded because COCO has no direct equivalent.
 
-## Files
+## Repository organization
 
-- `cityscapes_parts_1_2.py` - clean and distorted evaluation.
-- `cityscapes_parts_3_4.py` - restoration, robust YOLO fine-tuning, and evaluation.
-- `setup_cuda.ps1` - installs a CUDA-enabled PyTorch wheel and performs a real GPU smoke test.
-- `tests/` - unit and lightweight orchestration tests that do not download model weights.
+```text
+images_project/
+├── main.py                         # Small unified entry point
+├── cityscapes_parts_1_2.py         # Legacy-compatible Parts 1/2 launcher
+├── cityscapes_parts_3_4.py         # Legacy-compatible Parts 3/4 launcher
+├── cityscapes_project/
+│   ├── config.py                   # Constants and dataclass configurations
+│   ├── dataset.py                  # Discovery, loading, label/box conversion
+│   ├── types.py                    # Shared sample and detection records
+│   ├── cli.py                      # Unified and compatible command parsers
+│   ├── methods/
+│   │   ├── classical.py            # ORB and Canny
+│   │   ├── distortions.py          # Noise, JPEG, low light, motion blur, SNR
+│   │   ├── restoration.py          # Part 3 restoration algorithms
+│   │   ├── segmentation.py         # SegFormer inference and metrics
+│   │   └── detection.py            # YOLO conversion and AP metrics
+│   ├── pipelines/
+│   │   ├── parts12.py              # Part 1/2 orchestration
+│   │   └── parts34.py              # Part 3/4 orchestration
+│   └── utils/
+│       ├── dependencies.py         # Optional dependency error messages
+│       ├── device.py               # CUDA/CPU selection and model loading
+│       ├── io.py                   # JSON and CSV writing
+│       ├── timing.py               # Runtime extrapolation
+│       └── visualization.py        # Overlays, galleries, and plots
+├── tests/                          # Unit and lightweight pipeline tests
+├── requirements.txt
+└── setup_cuda.ps1
+```
 
-## Dataset setup
+The two original script names remain valid. They now only re-export public functions and call the organized package, so old commands and imports do not have to change.
 
-Download `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` from the [Cityscapes website](https://www.cityscapes-dataset.com/), then extract both under the same directory. This repository expects the existing local layout:
+## Dataset
+
+Download `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` from the [Cityscapes website](https://www.cityscapes-dataset.com/) and extract both beneath one root:
 
 ```text
 data/cityscapes/
-|-- leftImg8bit/
-|   |-- train/<city>/*_leftImg8bit.png
-|   `-- val/<city>/*_leftImg8bit.png
-`-- gtFine/
-    |-- train/<city>/*_gtFine_labelIds.png and *_instanceIds.png
-    `-- val/<city>/*_gtFine_labelIds.png and *_instanceIds.png
+├── leftImg8bit/
+│   ├── train/<city>/*_leftImg8bit.png
+│   └── val/<city>/*_leftImg8bit.png
+└── gtFine/
+    ├── train/<city>/*_gtFine_labelIds.png and *_instanceIds.png
+    └── val/<city>/*_gtFine_labelIds.png and *_instanceIds.png
 ```
 
-Official raw `labelIds` are converted in memory to the 19 contiguous Cityscapes train IDs. Prepared `labelTrainIds` masks are also accepted. Use the validation split for reported metrics because Cityscapes test labels are withheld.
+Raw `labelIds` are converted in memory to the 19 Cityscapes train IDs. Existing `labelTrainIds` files also work. Reported scores should use `val`, because test labels are withheld.
 
-## Installation and CUDA
+## Installation
 
-Python 3.10 or newer and an NVIDIA GPU/driver are recommended. In PowerShell, from this project directory:
+Python 3.10 or newer is recommended. From PowerShell in the repository root:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+For an NVIDIA GPU, install and verify CUDA-enabled PyTorch with:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\setup_cuda.ps1
-```
-
-`setup_cuda.ps1` replaces a CPU-only PyTorch installation with the official CUDA 13.0 wheel and verifies `torch.cuda.is_available()`, the GPU name, GPU memory, and an FP16 matrix operation. CUDA 13.0 is appropriate for the RTX 4060 and the installed recent NVIDIA driver. To select another supported wheel:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_cuda.ps1 -CudaWheel cu126
-```
-
-Confirm the exact interpreter before a long run:
-
-```powershell
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-The project uses CUDA through PyTorch, Transformers, and Ultralytics. CuPy is not required: the expensive SegFormer, YOLO inference, and YOLO training already run on the GPU, while the small OpenCV preprocessing/restoration operations remain on the CPU. FP16 is enabled by default on CUDA; pass `--no-half` only if a model or GPU has a precision issue.
+The first model run downloads `yolov8n.pt` and `nvidia/segformer-b0-finetuned-cityscapes-1024-1024`.
 
-Pretrained weights are downloaded automatically on first use:
+## GPU and CuPy policy
 
-- `yolov8n.pt`
-- `nvidia/segformer-b0-finetuned-cityscapes-1024-1024`
+Use `--device cuda` to enable GPU model inference/training, `--device cuda:0` to select a GPU, or `--device cpu` to disable GPU use. CUDA half precision is enabled by default; add `--no-half` if it causes a precision or compatibility problem.
 
-## Quick CUDA test of all four parts
+CuPy is intentionally **not** a project dependency. Gaussian noise generation is a small NumPy operation, while Gaussian/non-local-means restoration is implemented by OpenCV on the CPU. Moving each full-resolution image to and from a CuPy array would add transfer and installation overhead without accelerating the expensive YOLO and SegFormer stages. Those stages already remain on the GPU through PyTorch, so arrays are not repeatedly transferred between NumPy and CuPy.
 
-Run these before a complete experiment:
+## Running the project
+
+The unified entry point accepts `--part 1`, `2`, `3`, `4`, or `all`.
+
+Quick smoke test of the complete pipeline:
 
 ```powershell
-python cityscapes_parts_1_2.py `
+python .\main.py `
   --dataset-root .\data\cityscapes `
-  --output-dir .\outputs `
-  --part both `
-  --quick `
-  --device cuda
-
-python cityscapes_parts_3_4.py `
-  --dataset-root .\data\cityscapes `
-  --output-dir .\outputs_parts_3_4 `
+  --output-dir .\outputs_quick `
   --artifacts-dir .\artifacts `
-  --part both `
+  --part all `
   --quick `
   --device cuda
 ```
 
-Quick mode uses four evaluation images and two levels per distortion. Part 4 prepares 32 training images and 8 validation images and trains for one epoch. It verifies the complete path but is not intended to produce final report scores.
-
-## Complete experiment
-
-### Parts 1 and 2
+Run individual parts:
 
 ```powershell
-python cityscapes_parts_1_2.py `
-  --dataset-root .\data\cityscapes `
-  --output-dir .\outputs_full `
-  --part both `
-  --split val `
-  --max-samples 0 `
-  --device cuda
+python .\main.py --dataset-root .\data\cityscapes --output-dir .\outputs --part 1 --device cuda
+python .\main.py --dataset-root .\data\cityscapes --output-dir .\outputs --part 2 --device cuda
+python .\main.py --dataset-root .\data\cityscapes --output-dir .\outputs --part 3 --device cuda
+python .\main.py --dataset-root .\data\cityscapes --output-dir .\outputs --part 4 --device cuda
 ```
 
-This evaluates 500 clean images plus 10,000 distorted images: four distortions, five levels, and 500 images.
+Part 2 automatically computes the clean Part 1 references it needs. Use a single command line if PowerShell backticks are inconvenient.
 
-### Parts 3 and 4
+The original commands are still supported:
 
 ```powershell
-python cityscapes_parts_3_4.py `
-  --dataset-root .\data\cityscapes `
-  --output-dir .\outputs_parts_3_4_full `
-  --artifacts-dir .\artifacts `
-  --part both `
-  --max-samples 0 `
-  --device cuda `
-  --part4-epochs 20 `
-  --part4-image-size 640 `
-  --part4-batch 8
+python .\cityscapes_parts_1_2.py --dataset-root .\data\cityscapes --output-dir .\outputs --part both --device cuda
+python .\cityscapes_parts_3_4.py --dataset-root .\data\cityscapes --output-dir .\outputs_parts_3_4 --artifacts-dir .\artifacts --part both --device cuda
 ```
 
-An 8 GB RTX 4060 should normally handle YOLOv8n at batch 8. If CUDA reports out-of-memory, rerun with `--part4-batch 4`. When both parts run in one command, Part 3 models are released and the CUDA cache is cleared before Part 4 training.
-
-Part 4 training artifacts can be large and are intentionally excluded by `.gitignore`. The prepared dataset is deterministic and is reused on later runs with the same recipe. Use `--rebuild-training-data` to regenerate it.
-
-To evaluate an existing fine-tuned checkpoint without retraining:
+Evaluate an existing fine-tuned checkpoint without training again:
 
 ```powershell
-python cityscapes_parts_3_4.py `
+python .\main.py `
   --dataset-root .\data\cityscapes `
   --part 4 `
   --device cuda `
-  --fine-tuned-weights .\artifacts\part4\training_runs\cityscapes_robust_yolov8n\weights\best.pt
+  --fine-tuned-weights .\artifacts\part4\training_runs\<run-name>\weights\best.pt
 ```
 
-## Part 1 - clean evaluation
+## Main configuration options
 
-For every clean validation image, the script loads RGB, semantic, and instance annotations; creates the slide-style overlays; runs ORB, Canny, YOLO, and SegFormer; and evaluates predictions against ground truth. Clean Canny maps are packed to one bit per pixel before Part 2, avoiding roughly one gigabyte of unnecessary in-memory edge maps on the full split.
+| Option | Default | Meaning |
+|---|---:|---|
+| `--part` | `all` in `main.py` | One numbered part or the complete pipeline |
+| `--max-samples` | `0` | Deterministic evaluation limit; `0` uses all 500 validation images |
+| `--seed` | `7` | Sampling, distortion, assignment, and training seed |
+| `--device` | `auto` | `auto`, `cpu`, `cuda`, `cuda:0`, or `mps` |
+| `--no-half` | off | Disable CUDA half precision |
+| `--quick` | off | Four evaluation images, two levels, and tiny Part 4 training |
+| `--part4-train-samples` | `0` | Training-image limit; `0` uses all 2,975 train images |
+| `--part4-val-samples` | `0` | Training-validation limit; `0` uses all 500 validation images |
+| `--part4-epochs` | `20` | YOLO fine-tuning epochs |
+| `--part4-image-size` | `640` | YOLO training resolution |
+| `--part4-batch` | `8` | Training batch size; try `4` after CUDA out-of-memory |
+| `--part4-clean-fraction` | `0.20` | Fraction of clean images in the robust training mixture |
+| `--rebuild-training-data` | off | Ignore and replace the reusable prepared Part 4 dataset |
 
-## Part 2 - controlled distortions
+The legacy launchers expose additional ORB, Canny, confidence, split, and gallery settings through `--help`.
 
-| Name in code | Default levels | Interpretation |
+## Distortions and restoration
+
+| Distortion | Five default levels | Part 3 restoration |
 |---|---|---|
-| `GaussNoise` | sigma 5, 10, 20, 35, 50 | additive RGB Gaussian noise |
-| `SevereJPEG` | quality 80, 60, 40, 20, 5 | lower quality is more severe |
-| `LowLight` | factor 0.80, 0.60, 0.40, 0.25, 0.10 | lower brightness is more severe |
-| `MotionBlur` | kernel 3, 5, 9, 15, 25 | longer fixed-angle motion kernel is more severe |
+| Gaussian noise | sigma 5, 10, 20, 35, 50 | colored non-local means plus bilateral filtering |
+| JPEG | quality 80, 60, 40, 20, 5 | luminance-channel bilateral filtering |
+| Low light | factor 0.80, 0.60, 0.40, 0.25, 0.10 | gamma lifting plus CLAHE |
+| Motion blur | kernel 3, 5, 9, 15, 25 | severity-scaled unsharp deblurring |
 
-The script reruns all four methods at every level and measures actual image SNR:
+SNR is calculated as `10 * log10(mean(clean²) / mean((clean - test)²))`. Restoration is evaluated rather than assumed to help; a negative gain remains in the result.
 
-```text
-SNR(dB) = 10 * log10(mean(clean^2) / mean((clean - test)^2))
-```
-
-## Part 3 - restoration and reevaluation
-
-Each distorted image is restored by a method suited to its corruption, then ORB, Canny, SegFormer, and YOLO are rerun on both distorted and restored versions.
-
-| Distortion | Restoration method |
-|---|---|
-| Gaussian noise | colored non-local means plus bilateral filtering |
-| JPEG artifacts | bilateral filtering on the luminance channel |
-| Low light | gamma lifting plus CLAHE local contrast enhancement |
-| Motion blur | severity-scaled unsharp deblurring |
-
-The result tables include distorted/restored SNR, ORB retention, Canny F1, SegFormer mIoU, YOLO mAP, per-class metrics, and the gain or loss caused by restoration. A restoration is not assumed to help; the measured comparison is the result.
-
-## Part 4 - distortion-robust YOLO
-
-Part 4 follows the slide-style supervised fine-tuning sequence:
-
-1. Read Cityscapes train and validation images and instance masks.
-2. Convert the seven shared instance classes to normalized YOLO labels.
-3. Deterministically assign clean or distorted training conditions; the default clean fraction is 20%.
-4. Fine-tune pretrained YOLOv8n with CUDA automatic mixed precision.
-5. Evaluate the original pretrained detector and fine-tuned detector on clean images and every distortion level.
-6. Report clean accuracy, robustness by SNR, per-class AP, and fine-tuning gains.
-
-The full train split is used when `--part4-train-samples 0`; the full validation split is used when `--part4-val-samples 0`. `--max-samples` separately controls the final Part 3/4 evaluation set.
-
-## Outputs
+## Outputs and example results
 
 ```text
-outputs_full/
-|-- run_manifest.json
-|-- part1/
-|   |-- clean_summary.json
-|   |-- clean_per_image.csv
-|   |-- segmentation_per_class.csv
-|   `-- detection_per_class.csv
-`-- part2/
-    |-- distorted_summary.json and .csv
-    |-- distorted_per_image.csv
-    |-- segmentation_per_class.csv
-    |-- detection_per_class.csv
-    `-- figures/
-
-outputs_parts_3_4_full/
-|-- run_manifest_parts_3_4.json
-|-- part3/
-|   |-- restoration_summary.json and .csv
-|   |-- restoration_per_image.csv
-|   |-- segmentation_per_class.csv
-|   |-- detection_per_class.csv
-|   `-- figures/restoration_grid.png and restored_performance.png
-`-- part4/
-    |-- fine_tuning_summary.json and .csv
-    |-- detection_per_class.csv
-    |-- run_summary.json
-    `-- figures/fine_tuning_per_snr.png
+outputs/
+├── run_manifest.json
+├── run_manifest_parts_3_4.json
+├── part1/clean_summary.json, per-image/per-class CSVs, figures/
+├── part2/distorted_summary.json, per-image/per-class CSVs, figures/
+├── part3/restoration_summary.json, per-image/per-class CSVs, figures/
+└── part4/fine_tuning_summary.json, per-class CSV, run_summary.json, figures/
 ```
 
-## Reproducibility
+The completed 20-image validation run produced these **illustrative**, non-final results:
 
-- Default random seed: `7`, matching the slide example.
-- Sample selection, distortions, training-condition assignment, and Ultralytics training seed are deterministic.
-- Run manifests record the full configuration and checkpoint path.
-- Low confidence (`0.001`) is used for YOLO AP curves so they are not truncated.
-- Semantic void label `255` is ignored.
-- AP uses 101-point interpolation at IoU thresholds 0.50 to 0.95.
+- Part 1 SegFormer mIoU: `0.5586`; pixel accuracy: `0.9120`.
+- Part 1 YOLO mAP@0.50:0.95: `0.2252`; mAP@0.50: `0.4418`.
+- Gaussian sigma 5 retained ORB matches at `0.9143`; sigma 50 reduced retention to `0.4545`.
+- Low-light factor 0.10 improved from `0.875 dB` distorted SNR to `9.930 dB` after restoration.
+- Motion-blur restoration was mixed: some levels helped downstream metrics and others did not.
+
+The 20-image Part 4 checkpoint used only 20 training images, so its extremely low fine-tuned score is a smoke-test result, not evidence about the full training recipe.
+
+## Runtime estimate
+
+The measured 20-image, all-level run took approximately **21 minutes 1 second** from the start of Part 1 through the end of Part 4. A direct 500/20 scale-up is **8.76 hours**. The full Part 4 recipe also expands from 20 training images and 5 epochs to 2,975 images and 20 epochs, although GPU training scales differently from evaluation.
+
+A realistic planning range on the same machine is therefore **about 9.5–11 hours for Parts 1–4**, not seven hours. Approximate contributions from the measured timestamps are:
+
+- Parts 1–2: about 1 hour 40 minutes when scaled to 500 images.
+- Part 3: about 5 hours 40 minutes, dominated by CPU non-local-means denoising.
+- Part 4 preparation, 20-epoch training, and full evaluation: roughly 2–3.5 hours.
+
+Machine load, model download/cache state, disk speed, CUDA version, and thermal limits can change the result. Run Parts 1–2, Part 3, and Part 4 separately if a single long session is risky; completed outputs and prepared Part 4 data are reusable.
 
 ## Tests
 
@@ -239,11 +217,15 @@ outputs_parts_3_4_full/
 python -m unittest discover -s tests -v
 ```
 
-The tests cover dataset discovery, Cityscapes ID mapping, all distortions, all restorations, packed Canny references, edge consistency, SNR, segmentation, detection AP, YOLO label conversion, deterministic training assignment, and pipeline output creation.
+The suite covers dataset discovery and ID mapping, distortions, restorations, Canny/ORB support, packed clean references, SNR, segmentation, detection AP, YOLO label conversion, deterministic training assignment, runtime extrapolation, and lightweight output creation. Tests do not download model weights.
 
-## References
+## Reproducibility, assumptions, and limitations
 
-- [Cityscapes dataset](https://www.cityscapes-dataset.com/)
-- [SegFormer-B0 Cityscapes checkpoint](https://huggingface.co/nvidia/segformer-b0-finetuned-cityscapes-1024-1024)
-- [Ultralytics training API](https://docs.ultralytics.com/modes/train/)
-- [Official PyTorch CUDA installation](https://pytorch.org/get-started/locally/)
+- The default seed is `7`; sample selection and synthetic conditions are deterministic.
+- Semantic void label `255` is ignored.
+- Detection AP uses 101-point interpolation at IoU thresholds 0.50–0.95.
+- The COCO/Cityscapes label spaces are not identical; only seven direct class matches are scored.
+- Box ground truth is derived from visible instance-mask pixels, not Cityscapes amodal boxes.
+- Part 3 restoration is CPU-heavy and is the largest evaluation bottleneck.
+- The fine-tuned detector needs the full training recipe before its results are suitable for the report.
+- Large datasets, generated outputs, checkpoints, and training artifacts are excluded by `.gitignore`.

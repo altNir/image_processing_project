@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-import cityscapes_parts_3_4 as project
+import cityscapes_project.pipelines.parts34 as project
 from cityscapes_parts_1_2 import Detection
 from cityscapes_parts_3_4 import (
     PROJECT_CLASS_TO_ID,

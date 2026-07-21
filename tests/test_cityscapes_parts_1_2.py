@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-import cityscapes_parts_1_2 as project
+import cityscapes_project.pipelines.parts12 as project
 from cityscapes_parts_1_2 import (
     Detection,
     ExperimentConfig,
@@ -22,6 +22,7 @@ from cityscapes_parts_1_2 import (
     evaluate_canny_edges,
     instance_mask_to_boxes,
     load_sample,
+    overlay_mask,
     pack_binary_map,
     raw_label_ids_to_train_ids,
     unpack_binary_map,
@@ -29,6 +30,13 @@ from cityscapes_parts_1_2 import (
 
 
 class DatasetTests(unittest.TestCase):
+    def test_overlay_mask_preserves_slide_style_pil_interface(self) -> None:
+        image = Image.fromarray(np.full((2, 3, 3), 100, dtype=np.uint8))
+        mask = np.zeros((2, 3), dtype=np.uint8)
+        result = overlay_mask(image, mask)
+        self.assertIsInstance(result, Image.Image)
+        self.assertEqual(result.size, image.size)
+
     def test_discover_official_layout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

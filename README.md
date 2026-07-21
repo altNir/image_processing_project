@@ -31,13 +31,11 @@ Cityscapes instance masks are converted to object boxes. Evaluation uses the sev
 ```text
 images_project/
 ├── main.py                         # Small unified entry point
-├── cityscapes_parts_1_2.py         # Legacy-compatible Parts 1/2 launcher
-├── cityscapes_parts_3_4.py         # Legacy-compatible Parts 3/4 launcher
 ├── cityscapes_project/
 │   ├── config.py                   # Constants and dataclass configurations
 │   ├── dataset.py                  # Discovery, loading, label/box conversion
 │   ├── types.py                    # Shared sample and detection records
-│   ├── cli.py                      # Unified and compatible command parsers
+│   ├── cli.py                      # Unified command parser
 │   ├── methods/
 │   │   ├── classical.py            # ORB and Canny
 │   │   ├── distortions.py          # Noise, JPEG, low light, motion blur, SNR
@@ -53,12 +51,13 @@ images_project/
 │       ├── io.py                   # JSON and CSV writing
 │       ├── timing.py               # Runtime extrapolation
 │       └── visualization.py        # Overlays, galleries, and plots
-├── tests/                          # Unit and lightweight pipeline tests
+├── tests/
+│   ├── test_core_methods.py
+│   ├── test_restoration_and_training.py
+│   └── test_timing.py
 ├── requirements.txt
 └── setup_cuda.ps1
 ```
-
-The two original script names remain valid. They now only re-export public functions and call the organized package, so old commands and imports do not have to change.
 
 ## Dataset
 
@@ -129,13 +128,6 @@ python .\main.py --dataset-root .\data\cityscapes --output-dir .\outputs --part 
 
 Part 2 automatically computes the clean Part 1 references it needs. Use a single command line if PowerShell backticks are inconvenient.
 
-The original commands are still supported:
-
-```powershell
-python .\cityscapes_parts_1_2.py --dataset-root .\data\cityscapes --output-dir .\outputs --part both --device cuda
-python .\cityscapes_parts_3_4.py --dataset-root .\data\cityscapes --output-dir .\outputs_parts_3_4 --artifacts-dir .\artifacts --part both --device cuda
-```
-
 Evaluate an existing fine-tuned checkpoint without training again:
 
 ```powershell
@@ -151,11 +143,22 @@ python .\main.py `
 | Option | Default | Meaning |
 |---|---:|---|
 | `--part` | `all` in `main.py` | One numbered part or the complete pipeline |
+| `--split` | `val` | Cityscapes split used for evaluation |
 | `--max-samples` | `0` | Deterministic evaluation limit; `0` uses all 500 validation images |
 | `--seed` | `7` | Sampling, distortion, assignment, and training seed |
 | `--device` | `auto` | `auto`, `cpu`, `cuda`, `cuda:0`, or `mps` |
 | `--no-half` | off | Disable CUDA half precision |
 | `--quick` | off | Four evaluation images, two levels, and tiny Part 4 training |
+| `--nfeatures` | `800` | Maximum number of ORB features |
+| `--orb-ratio-threshold` | `0.75` | ORB descriptor ratio-test threshold |
+| `--orb-spatial-threshold` | `3.0` | Maximum aligned-keypoint distance in pixels |
+| `--canny-low-threshold` | `100` | Lower Canny hysteresis threshold |
+| `--canny-high-threshold` | `200` | Upper Canny hysteresis threshold |
+| `--canny-blur-kernel` | `5` | Positive odd Gaussian pre-blur size |
+| `--canny-tolerance-radius` | `2` | Edge-matching tolerance in pixels |
+| `--yolo-eval-confidence` | `0.001` | Low confidence floor used for AP evaluation |
+| `--yolo-visual-confidence` | `0.25` | Confidence floor used in gallery figures |
+| `--gallery-samples` | `4` | Number of representative gallery samples |
 | `--part4-train-samples` | `0` | Training-image limit; `0` uses all 2,975 train images |
 | `--part4-val-samples` | `0` | Training-validation limit; `0` uses all 500 validation images |
 | `--part4-epochs` | `20` | YOLO fine-tuning epochs |
@@ -164,7 +167,7 @@ python .\main.py `
 | `--part4-clean-fraction` | `0.20` | Fraction of clean images in the robust training mixture |
 | `--rebuild-training-data` | off | Ignore and replace the reusable prepared Part 4 dataset |
 
-The legacy launchers expose additional ORB, Canny, confidence, split, and gallery settings through `--help`.
+Run `python .\main.py --help` for the complete option list.
 
 ## Distortions and restoration
 

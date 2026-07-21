@@ -8,25 +8,20 @@ import numpy as np
 from PIL import Image
 
 import cityscapes_project.pipelines.parts12 as project
-from cityscapes_parts_1_2 import (
-    Detection,
-    ExperimentConfig,
-    SegmentationAccumulator,
-    apply_aug,
-    bbox_iou,
-    canny_detect,
-    compute_ious,
-    compute_snr,
+from cityscapes_project.config import ExperimentConfig
+from cityscapes_project.dataset import (
     discover_cityscapes_samples,
-    evaluate_detections,
-    evaluate_canny_edges,
     instance_mask_to_boxes,
     load_sample,
-    overlay_mask,
-    pack_binary_map,
     raw_label_ids_to_train_ids,
-    unpack_binary_map,
 )
+from cityscapes_project.methods.classical import canny_detect, evaluate_canny_edges
+from cityscapes_project.methods.detection import bbox_iou, evaluate_detections
+from cityscapes_project.methods.distortions import apply_aug, compute_snr
+from cityscapes_project.methods.segmentation import SegmentationAccumulator, compute_ious
+from cityscapes_project.pipelines.parts12 import pack_binary_map, unpack_binary_map
+from cityscapes_project.types import Detection
+from cityscapes_project.utils.visualization import overlay_mask
 
 
 class DatasetTests(unittest.TestCase):

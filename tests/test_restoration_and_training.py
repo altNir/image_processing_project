@@ -9,14 +9,14 @@ import numpy as np
 from PIL import Image
 
 import cityscapes_project.pipelines.parts34 as project
-from cityscapes_parts_1_2 import Detection
-from cityscapes_parts_3_4 import (
+from cityscapes_project.config import Parts34Config
+from cityscapes_project.methods.restoration import restore_image
+from cityscapes_project.pipelines.parts34 import (
     PROJECT_CLASS_TO_ID,
-    Parts34Config,
     choose_training_condition,
     detection_to_yolo_row,
-    restore_image,
 )
+from cityscapes_project.types import Detection
 
 
 class RestorationTests(unittest.TestCase):

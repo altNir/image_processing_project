@@ -4,7 +4,7 @@ This course project studies how classical and deep-learning vision methods behav
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
-> **Current result status:** the repository includes a complete 20-image validation run for all four parts. It is useful for checking the pipeline and identifying trends, but it is not the final 500-image benchmark. The included Part 4 checkpoint is an intentionally small smoke test and did not learn a useful detector.
+> **Current result status:** the repository includes a successful 125-image validation run for all four parts. Part 4 was trained for 20 epochs on 1,000 training images with 125 separate validation images. This is a substantial intermediate experiment, but the final benchmark should still use all 500 Cityscapes validation images and the complete 2,975-image training split.
 
 ## Project overview
 
@@ -52,21 +52,25 @@ Cityscapes instance masks are converted to visible object bounding boxes. Detect
 
 Restoration is evaluated rather than assumed to help. A negative SNR or task-metric gain is preserved in the output because aggressive restoration can remove useful features or create artifacts.
 
-## Preliminary results: 20-image validation run
+## Results: 125-image validation run
 
-These results were generated with seed `7`, all five severity levels, CUDA inference, 20 Cityscapes validation images, and the strict detection metric mAP@0.50:0.95. Raw results are available under [`outputs_20_images/`](outputs_20_images/).
+These results were generated with seed `7`, all five severity levels, CUDA inference, 125 Cityscapes validation images, and the strict detection metric mAP@0.50:0.95. Part 4 used 1,000 training images, 125 separate training-validation images, and 20 epochs. Raw results are available under [`outputs_big_125/`](outputs_big_125/).
+
+The run completed successfully in 1 hour 57 minutes 28 seconds on an NVIDIA GeForce RTX 4060. Parts 2, 3, and 4 reuse the same image IDs and distortion seeds, and their shared metrics match exactly.
 
 ### Part 1: clean baselines
 
 | Metric | Result |
 |---|---:|
-| SegFormer mean IoU | 0.5586 |
-| SegFormer pixel accuracy | 0.9120 |
-| YOLO mAP@0.50:0.95 | 0.2252 |
-| YOLO mAP@0.50 | 0.4418 |
-| YOLO recall@0.50 | 0.5924 |
+| SegFormer mean IoU | 0.5827 |
+| SegFormer pixel accuracy | 0.9212 |
+| YOLO mAP@0.50:0.95 | 0.1762 |
+| YOLO mAP@0.50 | 0.2916 |
+| YOLO recall@0.50 | 0.4792 |
 
-![Clean Cityscapes predictions](outputs_20_images/part1/figures/clean_predictions.png)
+The larger sample contains 2,214 ground-truth objects and all seven shared detection classes. Its detection baseline is lower than the earlier 20-image value because the new sample is more diverse and includes rare classes that were absent or represented by only a few objects in the smoke run.
+
+![Clean Cityscapes predictions](outputs_big_125/part1/figures/clean_predictions.png)
 
 ### Part 2: distortion robustness
 
@@ -74,15 +78,15 @@ The table shows the strongest tested level of each distortion. ORB and Canny val
 
 | Condition | ORB match retention | Canny F1 | Segmentation mIoU | Detection mAP@0.50:0.95 |
 |---|---:|---:|---:|---:|
-| Clean | 1.0000 | 1.0000 | 0.5586 | 0.2252 |
-| Gaussian noise, sigma 50 | 0.4545 | 0.8011 | 0.4045 | 0.0380 |
-| JPEG, quality 5 | 0.4789 | 0.8609 | 0.3052 | 0.1184 |
-| Low light, factor 0.10 | 0.0000 | 0.0000 | 0.4682 | 0.0959 |
-| Motion blur, kernel 25 | 0.0273 | 0.1267 | 0.4741 | 0.1157 |
+| Clean | 1.0000 | 1.0000 | 0.5827 | 0.1762 |
+| Gaussian noise, sigma 50 | 0.4284 | 0.7715 | 0.4201 | 0.0297 |
+| JPEG, quality 5 | 0.4448 | 0.8351 | 0.3202 | 0.1069 |
+| Low light, factor 0.10 | 0.0000 | 0.0000 | 0.5069 | 0.0953 |
+| Motion blur, kernel 25 | 0.0269 | 0.1065 | 0.4876 | 0.0870 |
 
 The results expose different failure modes: low light and motion blur strongly affect classical features, while severe noise and JPEG compression cause the largest segmentation and detection losses.
 
-![Performance as measured SNR decreases](outputs_20_images/part2/figures/performance_per_snr.png)
+![Performance as measured SNR decreases](outputs_big_125/part2/figures/performance_per_snr.png)
 
 ### Part 3: restoration
 
@@ -90,20 +94,27 @@ Restoration helps most when degradation is severe, but the fixed restoration str
 
 | Condition | SNR before -> after | Segmentation mIoU before -> after | Detection mAP before -> after |
 |---|---:|---:|---:|
-| Gaussian noise, sigma 50 | 6.44 -> 17.47 dB | 0.4045 -> 0.4267 | 0.0380 -> 0.1095 |
-| JPEG, quality 5 | 18.63 -> 19.30 dB | 0.3052 -> 0.3200 | 0.1184 -> 0.1328 |
-| Low light, factor 0.10 | 0.88 -> 9.93 dB | 0.4682 -> 0.5131 | 0.0959 -> 0.2044 |
-| Motion blur, kernel 25 | 17.82 -> 17.02 dB | 0.4741 -> 0.4755 | 0.1157 -> 0.1036 |
+| Gaussian noise, sigma 50 | 6.20 -> 17.54 dB | 0.4201 -> 0.4170 | 0.0297 -> 0.0837 |
+| JPEG, quality 5 | 18.50 -> 19.14 dB | 0.3202 -> 0.3419 | 0.1069 -> 0.1116 |
+| Low light, factor 0.10 | 0.87 -> 10.31 dB | 0.5069 -> 0.5376 | 0.0953 -> 0.1749 |
+| Motion blur, kernel 25 | 18.42 -> 17.63 dB | 0.4876 -> 0.4815 | 0.0870 -> 0.0865 |
 
-For example, severe low-light restoration substantially improved image quality, segmentation, and detection. Conversely, mild Gaussian denoising reduced ORB retention and segmentation quality because the filter removed useful detail. This is a measured limitation of the current fixed-parameter restoration design.
+Across all 20 distortion/severity combinations, restoration improved SNR in 10, ORB in 6, Canny in 9, segmentation in 5, and detection in 11. Severe low-light restoration substantially improved image quality, segmentation, and detection. Severe Gaussian denoising improved SNR and detection but slightly reduced segmentation and classical-feature scores. The result supports a task-dependent conclusion: improving image quality does not guarantee improvement in every downstream vision metric.
 
-![Distorted and restored performance](outputs_20_images/part3/figures/restored_performance.png)
+![Distorted and restored performance](outputs_big_125/part3/figures/restored_performance.png)
 
-### Part 4: fine-tuning status
+### Part 4: distortion-aware fine-tuning
 
-The tracked Part 4 run used only 20 training images, 20 validation images, and 5 epochs. Its clean mAP@0.50:0.95 fell from `0.2252` to `0.0004`. This checkpoint is unsuccessful and must not be reported as evidence that robustness fine-tuning works.
+The 1,000-image, 20-epoch fine-tuning run preserved clean performance and improved robustness under most distortions:
 
-The smoke run verifies that data preparation, training, checkpoint loading, and evaluation complete end to end. A valid Part 4 conclusion requires the full training split, a separate validation split, and the default 20-epoch recipe.
+| Comparison | Pretrained | Fine-tuned | Change |
+|---|---:|---:|---:|
+| Clean mAP@0.50:0.95 | 0.1762 | 0.1766 | +0.0004 |
+| Mean distorted mAP@0.50:0.95 | 0.1415 | 0.1567 | +0.0152 |
+
+The relative improvement in mean distorted mAP is approximately 10.8%, and 17 of 20 distorted conditions improved. The largest gains occurred for Gaussian noise sigma 50 (+0.0542), Gaussian noise sigma 35 (+0.0443), low light factor 0.10 (+0.0412), and motion blur kernel 25 (+0.0378). Small regressions remained for Gaussian noise sigma 5 and JPEG qualities 60 and 40, showing the expected trade-off between severe-distortion robustness and mild-condition performance.
+
+![Pretrained and fine-tuned YOLO robustness](outputs_big_125/part4/figures/fine_tuning_per_snr.png)
 
 ## Dataset
 
@@ -265,15 +276,15 @@ outputs/
     `-- figures/
 ```
 
-Useful tracked examples:
+Useful tracked examples from the 125-image run:
 
-- [Part 1 clean summary](outputs_20_images/part1/clean_summary.json)
-- [Part 2 aggregate results](outputs_20_images/part2/distorted_summary.csv)
-- [Part 2 per-image results](outputs_20_images/part2/distorted_per_image.csv)
-- [Part 3 aggregate results](outputs_20_images/part3/restoration_summary.csv)
-- [Part 3 per-image results](outputs_20_images/part3/restoration_per_image.csv)
-- [Part 4 smoke-test results](outputs_20_images/part4/fine_tuning_summary.csv)
-- [Complete run configuration](outputs_20_images/run_manifest_parts_3_4.json)
+- [Part 1 clean summary](outputs_big_125/part1/clean_summary.json)
+- [Part 2 aggregate results](outputs_big_125/part2/distorted_summary.csv)
+- [Part 2 per-image results](outputs_big_125/part2/distorted_per_image.csv)
+- [Part 3 aggregate results](outputs_big_125/part3/restoration_summary.csv)
+- [Part 3 per-image results](outputs_big_125/part3/restoration_per_image.csv)
+- [Part 4 fine-tuning results](outputs_big_125/part4/fine_tuning_summary.csv)
+- [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
 
 ## Reproducibility and evaluation design
 
@@ -337,15 +348,23 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, re
 
 ## Runtime estimate
 
-The 20-image Parts 1-4 run took approximately 21 minutes on the tested machine. Scaling only the evaluation workload from 20 to 500 images gives about 8.8 hours. Full Part 4 training is not linear with that estimate because it expands from 20 training images and 5 epochs to 2,975 images and 20 epochs.
+The measured 125-image Parts 1-4 run took **1 hour 57 minutes 28 seconds** on an NVIDIA GeForce RTX 4060:
 
-For planning on the same machine, allow roughly 9.5 to 11 hours for the complete pipeline. Part 3 is the largest evaluation bottleneck because OpenCV non-local-means restoration runs on the CPU. Actual time depends on GPU model, CUDA installation, disk speed, cached model weights, and thermal limits.
+| Stage | Measured time |
+|---|---:|
+| Parts 1-2 | approximately 19 minutes |
+| Part 3 | approximately 75 minutes |
+| Part 4 | approximately 24 minutes |
+
+Scaling the evaluation-heavy stages from 125 to all 500 validation images suggests approximately 7.5 to 9 hours for the complete default pipeline on the same machine. Part 3 remains the largest bottleneck because OpenCV non-local-means restoration runs on the CPU. Part 4 training itself was comparatively fast: the 1,000-image, 20-epoch training phase completed in about 3 minutes 23 seconds, while dataset preparation and multi-condition evaluation accounted for most of Part 4's time.
+
+Actual runtime depends on GPU model, CUDA installation, disk speed, cached model weights, CPU load, and thermal limits. Running the parts separately is recommended for the final 500-image experiment.
 
 ## Assumptions and known limitations
 
-- The tracked 20-image results are preliminary and have high sampling uncertainty.
+- The tracked 125-image results are substantially more reliable than the smoke runs but still cover only one quarter of the 500-image validation split.
 - The full 500-image validation run has not yet been committed.
-- The 20-image Part 4 checkpoint is a failed smoke-test model, not a final result.
+- Part 4 used 1,000 of the 2,975 available training images; the complete training split may change the robustness trade-off.
 - Fixed restoration parameters can over-process mildly distorted images; Part 3 therefore reports both positive and negative gains.
 - The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
 - Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.

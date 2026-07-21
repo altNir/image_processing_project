@@ -4,7 +4,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 outputs/
+outputs_parts_3_4/
 artifacts/
+Ultralytics/
 data/
 datasets/
 *.pt

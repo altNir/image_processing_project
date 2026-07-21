@@ -1,4 +1,6 @@
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -66,6 +68,38 @@ class YoloDatasetTests(unittest.TestCase):
             choose_training_condition(0, "sample", 7, levels, 0.0)[0],
             "GaussNoise",
         )
+
+    def test_train_yolo_returns_the_checkpoint_reported_by_ultralytics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            actual_best = root / "ultralytics-selected-run" / "weights" / "best.pt"
+            actual_best.parent.mkdir(parents=True)
+            actual_best.write_bytes(b"checkpoint")
+            captured: dict[str, object] = {}
+
+            class FakeYOLO:
+                def __init__(self, _checkpoint: str) -> None:
+                    self.trainer = None
+
+                def train(self, **kwargs: object) -> None:
+                    captured.update(kwargs)
+                    self.trainer = types.SimpleNamespace(best=actual_best)
+
+            fake_ultralytics = types.SimpleNamespace(YOLO=FakeYOLO)
+            config = Parts34Config(
+                dataset_root=root,
+                artifacts_dir=root / "relative-artifacts",
+                part4_epochs=1,
+            )
+            yaml_path = root / "dataset.yaml"
+            yaml_path.write_text("names: {}\n", encoding="utf-8")
+            with patch.dict(sys.modules, {"ultralytics": fake_ultralytics}):
+                returned = project.train_yolo(config, yaml_path, "cpu")
+
+            self.assertEqual(returned, actual_best.resolve())
+            self.assertTrue(Path(str(captured["project"])).is_absolute())
+            self.assertIn("train-", str(captured["name"]))
+            self.assertIn("val-", str(captured["name"]))
 
 
 class Part3OrchestrationTests(unittest.TestCase):

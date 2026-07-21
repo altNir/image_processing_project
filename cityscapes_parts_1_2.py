@@ -557,7 +557,7 @@ def yolo_overlay(
         conf=conf,
         verbose=False,
         device=device,
-        half=bool(use_half and device and device.startswith("cuda")),
+        quantize=16 if use_half and device and device.startswith("cuda") else None,
     )[0]
     plotted_bgr = result.plot()
     return cv2.cvtColor(plotted_bgr, cv2.COLOR_BGR2RGB), result
@@ -577,7 +577,7 @@ def yolo_detections(
         max_det=300,
         verbose=False,
         device=device,
-        half=bool(use_half and device and device.startswith("cuda")),
+        quantize=16 if use_half and device and device.startswith("cuda") else None,
     )[0]
     if result.boxes is None or len(result.boxes) == 0:
         return []

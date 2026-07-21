@@ -590,7 +590,11 @@ def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
         train_device = 0
     elif device.startswith("cuda:"):
         train_device = int(device.split(":", 1)[1])
-    run_root = config.artifacts_dir / "part4" / "training_runs"
+    # Ultralytics interprets relative ``project`` paths beneath its default
+    # ``runs/detect`` directory. Resolve it first so checkpoints are stored
+    # exactly under our configured artifacts directory.
+    run_root = (config.artifacts_dir / "part4" / "training_runs").resolve()
+    run_name = _training_dataset_key(config)
     model.train(
         data=str(yaml_path),
         epochs=config.part4_epochs,
@@ -600,7 +604,7 @@ def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
         device=train_device,
         amp=bool(config.use_half and device.startswith("cuda")),
         project=str(run_root),
-        name="cityscapes_robust_yolov8n",
+        name=run_name,
         exist_ok=True,
         pretrained=True,
         seed=config.seed,
@@ -608,10 +612,18 @@ def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
         plots=True,
         verbose=True,
     )
-    best = run_root / "cityscapes_robust_yolov8n" / "weights" / "best.pt"
+    # Use the path chosen by the installed Ultralytics version. This remains
+    # correct if Ultralytics changes its run-directory layout or run name.
+    trainer = getattr(model, "trainer", None)
+    trainer_best = getattr(trainer, "best", None)
+    best = (
+        Path(trainer_best)
+        if trainer_best is not None
+        else run_root / run_name / "weights" / "best.pt"
+    )
     if not best.is_file():
         raise FileNotFoundError(f"YOLO training completed but best.pt was not found at {best}")
-    return best
+    return best.resolve()
 
 
 def model_detections(
@@ -629,7 +641,7 @@ def model_detections(
         max_det=300,
         verbose=False,
         device=device,
-        half=bool(use_half and device.startswith("cuda")),
+        quantize=16 if use_half and device.startswith("cuda") else None,
     )[0]
     if result.boxes is None or len(result.boxes) == 0:
         return []

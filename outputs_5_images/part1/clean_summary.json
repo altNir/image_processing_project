@@ -1,0 +1,32 @@
+{
+  "scope": "Part 1 - clean images",
+  "sample_count": 5,
+  "split": "val",
+  "segmentation": {
+    "mean_iou": 0.5294462143155897,
+    "pixel_accuracy": 0.9226788201804857,
+    "mean_class_accuracy": 0.5992678849599302
+  },
+  "detection": {
+    "map_50_95": 0.28660000925599083,
+    "map_50": 0.49264817863431676,
+    "mean_precision_50": 0.05142503545842911,
+    "mean_recall_50": 0.5865203761755486,
+    "mean_matched_iou_50": 0.5596639715515404,
+    "ground_truth_objects": 94.0,
+    "predicted_objects": 798.0,
+    "evaluated_classes": 4.0
+  },
+  "orb": {
+    "mean_keypoints": 800.0,
+    "mean_self_match_retention": 1.0
+  },
+  "canny": {
+    "mean_edge_pixels": 21122.4,
+    "mean_self_f1": 1.0,
+    "low_threshold": 100,
+    "high_threshold": 200,
+    "gaussian_blur_kernel": 5,
+    "tolerance_radius": 2
+  }
+}

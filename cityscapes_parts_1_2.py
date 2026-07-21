@@ -5,13 +5,14 @@ The file intentionally follows the order and naming used in the course slides:
 Part 1
     1. Prepare the dataset and plot labels.
     2. Run ORB feature detection.
-    3. Run pretrained YOLO object detection.
-    4. Run pretrained SegFormer semantic segmentation.
-    5. Compute clean-image metrics.
+    3. Run Canny edge detection.
+    4. Run pretrained YOLO object detection.
+    5. Run pretrained SegFormer semantic segmentation.
+    6. Compute clean-image metrics.
 
 Part 2
-    1. Introduce Gaussian noise, JPEG compression, and low light.
-    2. Run all three methods on distorted images.
+    1. Introduce Gaussian noise, JPEG compression, low light, and motion blur.
+    2. Run all four methods on distorted images.
     3. Measure ORB matching, segmentation IoU, and detection AP.
     4. Compute SNR and plot performance per SNR.
 
@@ -137,6 +138,9 @@ DEFAULT_DISTORTION_LEVELS: Mapping[str, tuple[float, ...]] = {
     "SevereJPEG": (80.0, 60.0, 40.0, 20.0, 5.0),
     # Values multiply RGB intensity. Lower means darker.
     "LowLight": (0.80, 0.60, 0.40, 0.25, 0.10),
+    # Values are odd motion-kernel lengths in pixels. The direction is fixed so
+    # kernel length, rather than direction, is the controlled variable.
+    "MotionBlur": (3.0, 5.0, 9.0, 15.0, 25.0),
 }
 
 
@@ -167,6 +171,10 @@ class ExperimentConfig:
     nfeatures: int = 800
     orb_ratio_threshold: float = 0.75
     orb_spatial_threshold: float = 3.0
+    canny_low_threshold: int = 100
+    canny_high_threshold: int = 200
+    canny_blur_kernel: int = 5
+    canny_tolerance_radius: int = 2
     yolo_model: str = "yolov8n.pt"
     yolo_eval_confidence: float = 0.001
     yolo_visual_confidence: float = 0.25
@@ -431,6 +439,100 @@ def measure_orb_matching(
         "spatial_inliers": float(len(inliers)),
         "match_retention": float(len(inliers) / clean_count),
         "inlier_ratio": float(len(inliers) / len(good_matches)) if good_matches else 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run Canny edge detector (edge-detection lectures).
+# ---------------------------------------------------------------------------
+
+
+def canny_detect(
+    img_pil: Image.Image,
+    low_threshold: int = 100,
+    high_threshold: int = 200,
+    blur_kernel: int = 5,
+) -> np.ndarray:
+    """Return a binary Canny edge map using fixed thresholds for every condition.
+
+    A small Gaussian pre-filter follows the lecture pipeline and prevents noise
+    from dominating the gradient calculation. Fixed parameters are essential:
+    retuning Canny for every distortion would conceal robustness degradation.
+    """
+
+    if low_threshold < 0 or high_threshold <= low_threshold:
+        raise ValueError("Canny thresholds must satisfy 0 <= low < high")
+    if blur_kernel < 1 or blur_kernel % 2 == 0:
+        raise ValueError("Canny blur_kernel must be a positive odd integer")
+    cv2 = _cv2()
+    rgb = np.asarray(img_pil.convert("RGB"), dtype=np.uint8)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    if blur_kernel > 1:
+        gray = cv2.GaussianBlur(gray, (blur_kernel, blur_kernel), 0)
+    return cv2.Canny(gray, low_threshold, high_threshold, L2gradient=True)
+
+
+def canny_overlay(img_pil: Image.Image, edges: np.ndarray) -> np.ndarray:
+    """Draw Canny edges in green over a dimmed RGB image."""
+
+    rgb = np.asarray(img_pil.convert("RGB"), dtype=np.uint8)
+    edge_mask = np.asarray(edges) > 0
+    output = (rgb.astype(np.float32) * 0.45).astype(np.uint8)
+    output[edge_mask] = np.asarray((0, 255, 0), dtype=np.uint8)
+    return output
+
+
+def evaluate_canny_edges(
+    reference_edges: np.ndarray,
+    test_edges: np.ndarray,
+    tolerance_radius: int = 2,
+) -> dict[str, float]:
+    """Measure edge consistency with spatially tolerant precision/recall/F1.
+
+    Cityscapes has no edge annotations, so clean-image Canny output is the
+    reference for later distorted-image comparisons. Dilation permits small
+    localization shifts without allowing unrelated edges to match.
+    """
+
+    if tolerance_radius < 0:
+        raise ValueError("tolerance_radius must be non-negative")
+    reference = (np.asarray(reference_edges) > 0).astype(np.uint8)
+    test = (np.asarray(test_edges) > 0).astype(np.uint8)
+    if reference.shape != test.shape:
+        raise ValueError("Reference and test edge maps must have the same shape")
+
+    cv2 = _cv2()
+    if tolerance_radius:
+        size = 2 * tolerance_radius + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+        reference_neighborhood = cv2.dilate(reference, kernel)
+        test_neighborhood = cv2.dilate(test, kernel)
+    else:
+        reference_neighborhood = reference
+        test_neighborhood = test
+
+    reference_count = int(reference.sum())
+    test_count = int(test.sum())
+    matched_test = int(((test > 0) & (reference_neighborhood > 0)).sum())
+    matched_reference = int(((reference > 0) & (test_neighborhood > 0)).sum())
+    precision = matched_test / test_count if test_count else (1.0 if reference_count == 0 else 0.0)
+    recall = (
+        matched_reference / reference_count
+        if reference_count
+        else (1.0 if test_count == 0 else 0.0)
+    )
+    f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "reference_edge_pixels": float(reference_count),
+        "test_edge_pixels": float(test_count),
+        "edge_pixel_retention": (
+            float(test_count / reference_count)
+            if reference_count
+            else (1.0 if test_count == 0 else 0.0)
+        ),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
     }
 
 
@@ -755,6 +857,45 @@ def low_light(image_rgb: np.ndarray, brightness: float) -> np.ndarray:
     return (image_rgb.astype(np.float32) * float(brightness)).clip(0, 255).astype(np.uint8)
 
 
+def motion_blur(
+    image_rgb: np.ndarray,
+    kernel_size: int,
+    angle_degrees: float = 15.0,
+) -> np.ndarray:
+    """Apply normalized linear motion blur with reflection at image borders.
+
+    The angle is fixed across severity levels so the experiment varies only the
+    blur length. Odd kernels have a well-defined central pixel and symmetric PSF.
+    """
+
+    if kernel_size < 1 or kernel_size % 2 == 0:
+        raise ValueError("Motion-blur kernel_size must be a positive odd integer")
+    if kernel_size == 1:
+        return np.asarray(image_rgb, dtype=np.uint8).copy()
+    cv2 = _cv2()
+    kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
+    center = (kernel_size - 1) / 2.0
+    radius = center
+    radians = math.radians(float(angle_degrees))
+    dx = radius * math.cos(radians)
+    dy = radius * math.sin(radians)
+    start = (int(round(center - dx)), int(round(center - dy)))
+    end = (int(round(center + dx)), int(round(center + dy)))
+    cv2.line(kernel, start, end, color=1.0, thickness=1, lineType=cv2.LINE_8)
+    kernel_sum = float(kernel.sum())
+    if kernel_sum <= 0:  # Defensive guard for unusual OpenCV builds.
+        kernel[int(center), int(center)] = 1.0
+        kernel_sum = 1.0
+    kernel /= kernel_sum
+    blurred = cv2.filter2D(
+        np.asarray(image_rgb, dtype=np.uint8),
+        ddepth=-1,
+        kernel=kernel,
+        borderType=cv2.BORDER_REFLECT101,
+    )
+    return np.asarray(blurred, dtype=np.uint8)
+
+
 def apply_aug(
     img_pil: Image.Image,
     distortion_name: str | Callable[[np.ndarray], np.ndarray],
@@ -774,6 +915,11 @@ def apply_aug(
         return jpeg_compression(image, quality=int(level))
     if distortion_name == "LowLight":
         return low_light(image, brightness=float(level))
+    if distortion_name == "MotionBlur":
+        kernel_size = int(level)
+        if float(kernel_size) != float(level):
+            raise ValueError("MotionBlur level must be an integer kernel size")
+        return motion_blur(image, kernel_size=kernel_size)
     raise KeyError(f"Unknown distortion: {distortion_name}")
 
 
@@ -860,12 +1006,14 @@ def save_part1_gallery(
     if not records:
         return
     plt = _matplotlib()
-    figure, axes = plt.subplots(len(records), 5, figsize=(20, 4.6 * len(records)), squeeze=False)
-    titles = ("Clean", "Ground truth", "ORB", "YOLO", "SegFormer")
+    figure, axes = plt.subplots(len(records), 6, figsize=(24, 4.6 * len(records)), squeeze=False)
+    titles = ("Clean", "Ground truth", "ORB", "Canny", "YOLO", "SegFormer")
     for column, title in enumerate(titles):
         axes[0, column].set_title(title, fontsize=13)
     for row_index, record in enumerate(records):
-        for column, key in enumerate(("clean", "ground_truth", "orb", "yolo", "segmentation")):
+        for column, key in enumerate(
+            ("clean", "ground_truth", "orb", "canny", "yolo", "segmentation")
+        ):
             axes[row_index, column].imshow(record[key])
             axes[row_index, column].axis("off")
         axes[row_index, 0].set_ylabel(str(record["sample_id"]), fontsize=8)
@@ -908,9 +1056,11 @@ def save_performance_snr_plot(rows: Sequence[Mapping[str, Any]], output_path: Pa
     if not rows:
         return
     plt = _matplotlib()
-    figure, axes = plt.subplots(1, 3, figsize=(18, 5.2))
+    figure, axes = plt.subplots(2, 2, figsize=(14, 10.0))
+    axes = axes.ravel()
     metrics = (
         ("orb_match_retention", "ORB spatial match retention"),
+        ("canny_f1", "Canny tolerant edge F1"),
         ("seg_mean_iou", "SegFormer mean IoU"),
         ("det_map_50_95", "YOLO mAP@0.50:0.95"),
     )
@@ -943,11 +1093,11 @@ def save_part2_gallery(
     if not rows:
         return
     plt = _matplotlib()
-    figure, axes = plt.subplots(len(rows), 4, figsize=(16, 4.5 * len(rows)), squeeze=False)
-    for column, title in enumerate(("Distorted", "ORB", "YOLO", "SegFormer")):
+    figure, axes = plt.subplots(len(rows), 5, figsize=(20, 4.5 * len(rows)), squeeze=False)
+    for column, title in enumerate(("Distorted", "ORB", "Canny", "YOLO", "SegFormer")):
         axes[0, column].set_title(title, fontsize=13)
     for row_index, record in enumerate(rows):
-        for column, key in enumerate(("distorted", "orb", "yolo", "segmentation")):
+        for column, key in enumerate(("distorted", "orb", "canny", "yolo", "segmentation")):
             axes[row_index, column].imshow(record[key])
             axes[row_index, column].axis("off")
         axes[row_index, 0].set_ylabel(
@@ -1009,6 +1159,7 @@ def load_models(config: ExperimentConfig) -> tuple[Any, Any, Any, str]:
 class CleanReference:
     sample: CityscapesSample
     gt_detections: list[Detection]
+    clean_edges: np.ndarray
 
 
 def run_part1(
@@ -1050,6 +1201,17 @@ def run_part1(
             ratio_threshold=config.orb_ratio_threshold,
             spatial_threshold=config.orb_spatial_threshold,
         )
+        clean_edges = canny_detect(
+            image,
+            low_threshold=config.canny_low_threshold,
+            high_threshold=config.canny_high_threshold,
+            blur_kernel=config.canny_blur_kernel,
+        )
+        clean_canny = evaluate_canny_edges(
+            clean_edges,
+            clean_edges,
+            tolerance_radius=config.canny_tolerance_radius,
+        )
 
         all_predictions.extend(predictions)
         all_ground_truth.extend(gt_detections)
@@ -1058,6 +1220,8 @@ def run_part1(
                 "sample_id": sample.sample_id,
                 "orb_keypoints": clean_orb["clean_keypoints"],
                 "orb_self_match_retention": clean_orb["match_retention"],
+                "canny_edge_pixels": clean_canny["reference_edge_pixels"],
+                "canny_self_f1": clean_canny["f1"],
                 "seg_mean_iou": float(np.mean(list(image_ious.values()))) if image_ious else 0.0,
                 "seg_classes_present": len(image_ious),
                 "gt_detection_objects": len(gt_detections),
@@ -1068,11 +1232,13 @@ def run_part1(
             CleanReference(
                 sample=sample,
                 gt_detections=gt_detections,
+                clean_edges=clean_edges,
             )
         )
 
         if len(gallery) < config.gallery_samples:
             orb_image, keypoints, _ = orb_overlay(image, nfeatures=config.nfeatures)
+            canny_image = canny_overlay(image, clean_edges)
             yolo_image, result = yolo_overlay(image, detector, conf=config.yolo_visual_confidence)
             gallery.append(
                 {
@@ -1080,6 +1246,7 @@ def run_part1(
                     "clean": image,
                     "ground_truth": overlay_mask(image, label),
                     "orb": orb_image,
+                    "canny": canny_image,
                     "yolo": yolo_image,
                     "segmentation": seg_overlay(np.asarray(image), segmentation),
                     "orb_keypoints": len(keypoints),
@@ -1100,6 +1267,16 @@ def run_part1(
             "mean_self_match_retention": float(
                 np.mean([row["orb_self_match_retention"] for row in per_image_rows])
             ),
+        },
+        "canny": {
+            "mean_edge_pixels": float(
+                np.mean([row["canny_edge_pixels"] for row in per_image_rows])
+            ),
+            "mean_self_f1": float(np.mean([row["canny_self_f1"] for row in per_image_rows])),
+            "low_threshold": config.canny_low_threshold,
+            "high_threshold": config.canny_high_threshold,
+            "gaussian_blur_kernel": config.canny_blur_kernel,
+            "tolerance_radius": config.canny_tolerance_radius,
         },
     }
     write_json(output_dir / "clean_summary.json", summary)
@@ -1184,6 +1361,17 @@ def run_part2(
                     ratio_threshold=config.orb_ratio_threshold,
                     spatial_threshold=config.orb_spatial_threshold,
                 )
+                distorted_edges = canny_detect(
+                    distorted_image,
+                    low_threshold=config.canny_low_threshold,
+                    high_threshold=config.canny_high_threshold,
+                    blur_kernel=config.canny_blur_kernel,
+                )
+                canny_metrics = evaluate_canny_edges(
+                    reference.clean_edges,
+                    distorted_edges,
+                    tolerance_radius=config.canny_tolerance_radius,
+                )
                 segmentation = predict_segmentation(
                     distorted_image,
                     processor,
@@ -1214,6 +1402,12 @@ def run_part2(
                     "orb_spatial_inliers": orb_metrics["spatial_inliers"],
                     "orb_match_retention": orb_metrics["match_retention"],
                     "orb_inlier_ratio": orb_metrics["inlier_ratio"],
+                    "canny_clean_edge_pixels": canny_metrics["reference_edge_pixels"],
+                    "canny_distorted_edge_pixels": canny_metrics["test_edge_pixels"],
+                    "canny_edge_pixel_retention": canny_metrics["edge_pixel_retention"],
+                    "canny_precision": canny_metrics["precision"],
+                    "canny_recall": canny_metrics["recall"],
+                    "canny_f1": canny_metrics["f1"],
                     "seg_mean_iou": float(np.mean(list(image_ious.values()))) if image_ious else 0.0,
                     "seg_classes_present": len(image_ious),
                     "yolo_detection_objects": len(image_predictions),
@@ -1228,6 +1422,7 @@ def run_part2(
                     and level_index == len(levels) // 2
                 ):
                     orb_image, _, _ = orb_overlay(distorted_image, nfeatures=config.nfeatures)
+                    canny_image = canny_overlay(distorted_image, distorted_edges)
                     yolo_image, _ = yolo_overlay(
                         distorted_image,
                         detector,
@@ -1240,6 +1435,7 @@ def run_part2(
                             "snr_db": snr_db,
                             "distorted": distorted_rgb,
                             "orb": orb_image,
+                            "canny": canny_image,
                             "yolo": yolo_image,
                             "segmentation": seg_overlay(distorted_rgb, segmentation),
                         }
@@ -1263,6 +1459,16 @@ def run_part2(
                 "orb_inlier_ratio": float(
                     np.mean([float(row["orb_inlier_ratio"]) for row in variant_rows])
                 ),
+                "canny_edge_pixel_retention": float(
+                    np.mean([float(row["canny_edge_pixel_retention"]) for row in variant_rows])
+                ),
+                "canny_precision": float(
+                    np.mean([float(row["canny_precision"]) for row in variant_rows])
+                ),
+                "canny_recall": float(
+                    np.mean([float(row["canny_recall"]) for row in variant_rows])
+                ),
+                "canny_f1": float(np.mean([float(row["canny_f1"]) for row in variant_rows])),
                 "seg_mean_iou": segmentation_summary["mean_iou"],
                 "seg_pixel_accuracy": segmentation_summary["pixel_accuracy"],
                 "det_map_50_95": detection_summary["map_50_95"],
@@ -1359,6 +1565,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:0, or mps")
     parser.add_argument("--nfeatures", type=int, default=800)
+    parser.add_argument("--canny-low-threshold", type=int, default=100)
+    parser.add_argument("--canny-high-threshold", type=int, default=200)
+    parser.add_argument("--canny-blur-kernel", type=int, default=5)
+    parser.add_argument("--canny-tolerance-radius", type=int, default=2)
     parser.add_argument("--yolo-model", default="yolov8n.pt")
     parser.add_argument("--segformer-model", default=ExperimentConfig.segformer_model)
     parser.add_argument("--yolo-eval-confidence", type=float, default=0.001)
@@ -1389,6 +1599,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.seed,
         device=args.device,
         nfeatures=args.nfeatures,
+        canny_low_threshold=args.canny_low_threshold,
+        canny_high_threshold=args.canny_high_threshold,
+        canny_blur_kernel=args.canny_blur_kernel,
+        canny_tolerance_radius=args.canny_tolerance_radius,
         yolo_model=args.yolo_model,
         segformer_model=args.segformer_model,
         yolo_eval_confidence=args.yolo_eval_confidence,

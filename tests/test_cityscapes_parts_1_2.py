@@ -14,10 +14,12 @@ from cityscapes_parts_1_2 import (
     SegmentationAccumulator,
     apply_aug,
     bbox_iou,
+    canny_detect,
     compute_ious,
     compute_snr,
     discover_cityscapes_samples,
     evaluate_detections,
+    evaluate_canny_edges,
     instance_mask_to_boxes,
     load_sample,
     raw_label_ids_to_train_ids,
@@ -77,6 +79,29 @@ class DistortionTests(unittest.TestCase):
         self.assertEqual(dark.shape, self.image_array.shape)
         self.assertLess(float(dark.mean()), float(self.image_array.mean()))
 
+    def test_motion_blur_keeps_shape_and_changes_image(self) -> None:
+        blurred = apply_aug(self.image, "MotionBlur", 5.0)
+        self.assertEqual(blurred.shape, self.image_array.shape)
+        self.assertEqual(blurred.dtype, np.uint8)
+        self.assertFalse(np.array_equal(blurred, self.image_array))
+
+    def test_motion_blur_rejects_even_kernel(self) -> None:
+        with self.assertRaises(ValueError):
+            apply_aug(self.image, "MotionBlur", 4.0)
+
+    def test_motion_blur_preserves_constant_brightness(self) -> None:
+        constant = np.full((32, 32, 3), 137, dtype=np.uint8)
+        blurred = apply_aug(Image.fromarray(constant), "MotionBlur", 15.0)
+        self.assertTrue(np.array_equal(blurred, constant))
+
+    def test_stronger_motion_blur_reduces_snr_on_texture(self) -> None:
+        rng = np.random.default_rng(19)
+        textured = rng.integers(0, 256, size=(128, 128, 3), dtype=np.uint8)
+        image = Image.fromarray(textured)
+        mild = apply_aug(image, "MotionBlur", 3.0)
+        strong = apply_aug(image, "MotionBlur", 15.0)
+        self.assertGreater(compute_snr(textured, mild), compute_snr(textured, strong))
+
     def test_snr_identical_is_infinite(self) -> None:
         self.assertTrue(math.isinf(compute_snr(self.image_array, self.image_array)))
 
@@ -103,6 +128,32 @@ class SegmentationTests(unittest.TestCase):
         self.assertAlmostEqual(summary["mean_iou"], 1.0)
         self.assertAlmostEqual(summary["pixel_accuracy"], 1.0)
         self.assertEqual(int(rows[0]["gt_pixels"]), 1)
+
+
+class CannyTests(unittest.TestCase):
+    def test_tolerant_f1_accepts_one_pixel_shift(self) -> None:
+        reference = np.zeros((12, 12), dtype=np.uint8)
+        test = np.zeros_like(reference)
+        reference[:, 5] = 255
+        test[:, 6] = 255
+        metrics = evaluate_canny_edges(reference, test, tolerance_radius=1)
+        self.assertAlmostEqual(metrics["precision"], 1.0)
+        self.assertAlmostEqual(metrics["recall"], 1.0)
+        self.assertAlmostEqual(metrics["f1"], 1.0)
+
+    def test_empty_reference_and_test_are_perfectly_consistent(self) -> None:
+        empty = np.zeros((8, 8), dtype=np.uint8)
+        metrics = evaluate_canny_edges(empty, empty, tolerance_radius=2)
+        self.assertAlmostEqual(metrics["f1"], 1.0)
+        self.assertAlmostEqual(metrics["edge_pixel_retention"], 1.0)
+
+    def test_canny_detect_returns_binary_map(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        image[:, 16:] = 255
+        edges = canny_detect(Image.fromarray(image))
+        self.assertEqual(edges.shape, image.shape[:2])
+        self.assertTrue(set(np.unique(edges)).issubset({0, 255}))
+        self.assertGreater(int((edges > 0).sum()), 0)
 
 
 class DetectionTests(unittest.TestCase):
@@ -189,6 +240,8 @@ class PipelineOrchestrationTests(unittest.TestCase):
 
             self.assertEqual(part1["sample_count"], 1)
             self.assertEqual(part2["sample_count"], 1)
+            self.assertIn("canny", part1)
+            self.assertIn("canny_f1", part2["variants"][0])
             self.assertTrue((output / "part1" / "clean_summary.json").is_file())
             self.assertTrue((output / "part1" / "segmentation_per_class.csv").is_file())
             self.assertTrue((output / "part2" / "distorted_summary.csv").is_file())

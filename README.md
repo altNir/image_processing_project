@@ -4,7 +4,7 @@ This course project studies how classical and deep-learning vision methods behav
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
-> **Current result status:** Parts 1, 2, and 4 have a tracked 125-image run. Part 3 has been replaced by the final recipe-v3 experiment on 125 official Cityscapes validation images. Part 4 results and training artifacts are being audited separately.
+> **Current result status:** the repository includes 125-image results for all four parts. Part 3 is the final recipe-v3 experiment on official Cityscapes data. Part 4 includes a 20-epoch checkpoint trained on 1,000 images and validated on 125; both remain intermediate relative to the full 500-image evaluation and 2,975-image training split.
 
 ## Project overview
 
@@ -56,21 +56,23 @@ Part 3 is a paired experiment: the distorted and restored measurements use the s
 
 The detection evaluator is versioned. Version 2 matches each prediction to the highest-IoU *available* ground-truth box, fixing the crowded-object case in which the global best box was already claimed. When Part 2 results are reused, Part 3 reuses only validated ORB, Canny, and SegFormer baselines and recomputes distorted YOLO predictions so both detection conditions use evaluator version 2.
 
-## Results
+## Results: 125-image validation run
 
-The compact Parts 1-2 tables below are the original 20-image reference run; the repository also tracks the peer's 125-image outputs under [`outputs_big_125/`](outputs_big_125/). Part 3 reports the new official-data run separately.
+Parts 1, 2, and 4 use the peer's seed-`7` run under [`outputs_big_125/`](outputs_big_125/); Part 4 trained on 1,000 images for 20 epochs. Part 3 uses the same 125 evaluation IDs in a separate official-data run with the corrected evaluator and expanded statistical outputs.
 
 ### Part 1: clean baselines
 
 | Metric | Result |
 |---|---:|
-| SegFormer mean IoU | 0.5586 |
-| SegFormer pixel accuracy | 0.9120 |
-| YOLO mAP@0.50:0.95 | 0.2252 |
-| YOLO mAP@0.50 | 0.4418 |
-| YOLO recall@0.50 | 0.5924 |
+| SegFormer mean IoU | 0.5827 |
+| SegFormer pixel accuracy | 0.9212 |
+| YOLO mAP@0.50:0.95 | 0.1762 |
+| YOLO mAP@0.50 | 0.2916 |
+| YOLO recall@0.50 | 0.4792 |
 
-![Clean Cityscapes predictions](outputs_20_images/part1/figures/clean_predictions.png)
+The larger sample contains 2,214 ground-truth objects and all seven shared detection classes. Its detection baseline is lower than the earlier 20-image value because the new sample is more diverse and includes rare classes that were absent or represented by only a few objects in the smoke run.
+
+![Clean Cityscapes predictions](outputs_big_125/part1/figures/clean_predictions.png)
 
 ### Part 2: distortion robustness
 
@@ -78,15 +80,15 @@ The table shows the strongest tested level of each distortion. ORB and Canny val
 
 | Condition | ORB match retention | Canny F1 | Segmentation mIoU | Detection mAP@0.50:0.95 |
 |---|---:|---:|---:|---:|
-| Clean | 1.0000 | 1.0000 | 0.5586 | 0.2252 |
-| Gaussian noise, sigma 50 | 0.4545 | 0.8011 | 0.4045 | 0.0380 |
-| JPEG, quality 5 | 0.4789 | 0.8609 | 0.3052 | 0.1184 |
-| Low light, factor 0.10 | 0.0000 | 0.0000 | 0.4682 | 0.0959 |
-| Motion blur, kernel 25 | 0.0273 | 0.1267 | 0.4741 | 0.1157 |
+| Clean | 1.0000 | 1.0000 | 0.5827 | 0.1762 |
+| Gaussian noise, sigma 50 | 0.4284 | 0.7715 | 0.4201 | 0.0297 |
+| JPEG, quality 5 | 0.4448 | 0.8351 | 0.3202 | 0.1069 |
+| Low light, factor 0.10 | 0.0000 | 0.0000 | 0.5069 | 0.0953 |
+| Motion blur, kernel 25 | 0.0269 | 0.1065 | 0.4876 | 0.0870 |
 
 The results expose different failure modes: low light and motion blur strongly affect classical features, while severe noise and JPEG compression cause the largest segmentation and detection losses.
 
-![Performance as measured SNR decreases](outputs_20_images/part2/figures/performance_per_snr.png)
+![Performance as measured SNR decreases](outputs_big_125/part2/figures/performance_per_snr.png)
 
 ### Part 3: restoration
 
@@ -105,9 +107,18 @@ SSIM improved in all 20 variants, PSNR and MAE improved in 19, and detection mAP
 
 ![Part 3 distorted versus restored performance](outputs_part3_v3_125_official/part3/figures/restored_performance.png)
 
-### Part 4: fine-tuning status
+### Part 4: distortion-aware fine-tuning
 
-The peer's 125-image evaluation is tracked under `outputs_big_125/part4`. Its associated 1,000-train/125-validation training directory and checkpoint are not committed, so Part 4 remains under audit and is not summarized here as a final result.
+The 1,000-image, 20-epoch fine-tuning run preserved clean performance and improved robustness under most distortions:
+
+| Comparison | Pretrained | Fine-tuned | Change |
+|---|---:|---:|---:|
+| Clean mAP@0.50:0.95 | 0.1762 | 0.1766 | +0.0004 |
+| Mean distorted mAP@0.50:0.95 | 0.1415 | 0.1567 | +0.0152 |
+
+The relative improvement in mean distorted mAP is approximately 10.8%, and 17 of 20 distorted conditions improved. The largest gains occurred for Gaussian noise sigma 50 (+0.0542), Gaussian noise sigma 35 (+0.0443), low light factor 0.10 (+0.0412), and motion blur kernel 25 (+0.0378). Small regressions remained for Gaussian noise sigma 5 and JPEG qualities 60 and 40, showing the expected trade-off between severe-distortion robustness and mild-condition performance.
+
+![Pretrained and fine-tuned YOLO robustness](outputs_big_125/part4/figures/fine_tuning_per_snr.png)
 
 ## Dataset
 
@@ -288,17 +299,18 @@ outputs/
     `-- figures/
 ```
 
-Useful tracked examples:
+Useful tracked examples from the 125-image run:
 
-- [Part 1 clean summary](outputs_20_images/part1/clean_summary.json)
-- [Part 2 aggregate results](outputs_20_images/part2/distorted_summary.csv)
-- [Part 2 per-image results](outputs_20_images/part2/distorted_per_image.csv)
-- [Part 3 aggregate results](outputs_part3_v3_125_official/part3/restoration_summary.csv)
-- [Part 3 per-image results](outputs_part3_v3_125_official/part3/restoration_per_image.csv)
-- [Part 3 paired statistics](outputs_part3_v3_125_official/part3/paired_statistics.csv)
-- [Part 3 reproducibility manifest](outputs_part3_v3_125_official/part3/restoration_manifest.json)
-- [Part 4 smoke-test results](outputs_20_images/part4/fine_tuning_summary.csv)
-- [Complete run configuration](outputs_20_images/run_manifest_parts_3_4.json)
+- [Part 1 clean summary](outputs_big_125/part1/clean_summary.json)
+- [Part 2 aggregate results](outputs_big_125/part2/distorted_summary.csv)
+- [Part 2 per-image results](outputs_big_125/part2/distorted_per_image.csv)
+- [Part 3 aggregate results](outputs_big_125/part3/restoration_summary.csv)
+- [Part 3 per-image results](outputs_big_125/part3/restoration_per_image.csv)
+- [Part 3 paired statistics](outputs_big_125/part3/paired_statistics.csv)
+- [Part 3 reproducibility manifest](outputs_big_125/part3/restoration_manifest.json)
+- [Part 4 fine-tuning results](outputs_big_125/part4/fine_tuning_summary.csv)
+- [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
+- [Part 3 recipe-v3 run configuration](outputs_part3_v3_125_official/run_manifest_parts_3_4.json)
 
 `outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v3_125_official/` contains the final Part 3 code-compatible results. `incomplete_old_run/` is retained only for provenance and must not be combined with current results.
 
@@ -371,15 +383,14 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, se
 
 ## Runtime estimate
 
-The final 125-image Part 3 run took 67 minutes on the tested RTX 5090 machine, including CPU restoration and GPU inference. Runtime scales approximately linearly with sample count; a 500-image Part 3 run would therefore take about 4.5 hours with the same cache and hardware.
-
-Part 4 adds preparation of 2,975 training images, 20 YOLO epochs, and evaluation of the pretrained and fine-tuned detectors over 21 conditions. The RTX 5090 available for the final run should make neural inference and YOLO training comparatively fast; Part 3 remains CPU-bound because OpenCV non-local-means runs on the CPU. Actual duration must be calibrated after the Cityscapes data is available locally.
+The replacement 125-image Part 3 run took 67 minutes on an RTX 5090 system. The peer's earlier complete 125-image run took 1 hour 57 minutes on an RTX 4060, including approximately 19 minutes for Parts 1-2 and 24 minutes for Part 4. Part 4 training itself took about 3 minutes 23 seconds; multi-condition evaluation dominated its runtime. A 500-image Part 3 run is estimated at roughly 4.5 hours on the RTX 5090 system.
 
 ## Assumptions and known limitations
 
-- Parts 1, 2, and 4 still require a final consistency audit against the new evaluator and official-data provenance.
-- Part 3 uses 125 of the 500 validation images; paired intervals quantify image-level uncertainty, but a 500-image run would be stronger.
-- Severity-aware restoration reduces over-processing but cannot guarantee that every enhancement improves every downstream task.
+- The tracked 125-image results are substantially more reliable than the smoke runs but still cover only one quarter of the 500-image validation split.
+- Part 4 used 1,000 of the 2,975 available training images; the complete training split may change the robustness trade-off.
+- Parts 1, 2, and 4 were produced before detection evaluator version 2 and should be audited for strict cross-part consistency.
+- Severity-aware restoration can still remove features useful to downstream models; Part 3 therefore reports positive and negative gains.
 - The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
 - Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.
 - Some shared detection classes may be absent from a small sample; only classes with ground-truth instances contribute to mAP.

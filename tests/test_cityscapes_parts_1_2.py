@@ -22,7 +22,9 @@ from cityscapes_parts_1_2 import (
     evaluate_canny_edges,
     instance_mask_to_boxes,
     load_sample,
+    pack_binary_map,
     raw_label_ids_to_train_ids,
+    unpack_binary_map,
 )
 
 
@@ -131,6 +133,14 @@ class SegmentationTests(unittest.TestCase):
 
 
 class CannyTests(unittest.TestCase):
+    def test_binary_edge_map_pack_round_trip(self) -> None:
+        edges = np.zeros((7, 11), dtype=np.uint8)
+        edges[1:6, 4] = 255
+        packed = pack_binary_map(edges)
+        restored = unpack_binary_map(packed, edges.shape)
+        self.assertTrue(np.array_equal(restored, edges))
+        self.assertLess(packed.nbytes, edges.nbytes)
+
     def test_tolerant_f1_accepts_one_pixel_shift(self) -> None:
         reference = np.zeros((12, 12), dtype=np.uint8)
         test = np.zeros_like(reference)
@@ -224,7 +234,7 @@ class PipelineOrchestrationTests(unittest.TestCase):
                 "inlier_ratio": 0.875,
             }
 
-            def fake_yolo(_image, _model, image_id, conf=0.001):
+            def fake_yolo(_image, _model, image_id, conf=0.001, **_kwargs):
                 return [Detection(image_id, "car", (3.0, 2.0, 8.0, 6.0), score=0.9)]
 
             with (

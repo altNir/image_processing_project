@@ -1,255 +1,249 @@
-# Cityscapes Vision Robustness Project - Parts 1 and 2
+# Cityscapes Vision Robustness Project - Parts 1-4
 
-This repository implements **only Part 1 and Part 2** of the course project:
+This project evaluates computer-vision methods on clean and distorted Cityscapes images, restores the distorted images, and fine-tunes a detector for improved distortion robustness. The implementation follows the course-slide pipeline and helper style (`overlay_mask`, `orb_overlay`, `yolo_overlay`, `predict_segmentation`, `compute_ious`, `apply_aug`, and `compute_snr`) while adapting it to Cityscapes annotations.
 
-1. Measure ORB, Canny, YOLO, and SegFormer on clean Cityscapes images.
-2. Apply controlled distortions and measure how performance changes by distortion intensity and SNR.
+## Project design
 
-It intentionally does **not** implement image restoration/enhancement (Part 3) or model fine-tuning (Part 4).
-
-The implementation follows the code flow shown in the course slides as closely as practical. The main script retains the slide-style helpers `overlay_mask`, `orb_overlay`, `yolo_overlay`, `predict_segmentation`, `compute_ious`, `apply_aug`, and `compute_snr`, adapted from ADE20K to Cityscapes labels and annotations. Canny edge detection and motion blur extend the slide example to the four-method/four-distortion scope required for a three-person team.
-
-## Project choices
-
-| Item | Choice |
+| Part | Work performed |
 |---|---|
-| Dataset | Cityscapes fine annotations, normally the 500-image validation split |
-| Low-level task 1 | ORB feature detection and clean-to-distorted feature matching |
-| Low-level task 2 | Canny edge detection and clean-to-distorted edge consistency |
-| High-level task 1 | Semantic segmentation with SegFormer-B0 fine-tuned on Cityscapes |
-| High-level task 2 | Object detection with pretrained YOLOv8n |
-| Distortions | Gaussian noise, JPEG compression, low light, and motion blur |
-| ORB metrics | Keypoint retention, spatially verified match retention, and inlier ratio |
-| Canny metrics | Edge-pixel retention and tolerance-aware precision, recall, and F1 |
-| Segmentation metrics | Per-class IoU, mean IoU, pixel accuracy, and mean class accuracy |
-| Detection metrics | Per-class AP@0.50, mAP@0.50:0.95, precision, recall, and matched-box IoU |
+| Part 1 | Evaluate ORB, Canny, pretrained YOLOv8n, and Cityscapes SegFormer-B0 on clean images |
+| Part 2 | Apply Gaussian noise, JPEG compression, low light, and motion blur at five levels; rerun and evaluate all methods |
+| Part 3 | Restore every distorted image with a distortion-specific enhancement method; compare distorted versus restored results |
+| Part 4 | Build a mixed clean/distorted Cityscapes detection set, fine-tune YOLO, and compare pretrained versus fine-tuned detection |
 
-Cityscapes provides real semantic and instance annotations. Object-detection ground-truth boxes are derived from the instance masks rather than from clean YOLO predictions. This makes the detection results genuine ground-truth evaluation.
+The additional Canny method and motion-blur distortion are Arik's changes and are part of the final project direction.
+
+### Tasks and metrics
+
+| Task | Method | Main metrics |
+|---|---|---|
+| Local feature detection/matching | ORB | keypoint retention, spatial match retention, inlier ratio |
+| Edge detection | Canny | edge-pixel retention, tolerant precision, recall, F1 |
+| Semantic segmentation | SegFormer-B0 | per-class IoU, mean IoU, pixel accuracy, mean class accuracy |
+| Object detection | YOLOv8n | per-class AP@0.50, mAP@0.50:0.95, precision, recall, matched-box IoU |
+| Image quality | SNR | SNR in dB before and after restoration |
+
+Cityscapes instance masks are converted to real object-detection ground-truth boxes. The evaluated classes shared directly by Cityscapes and COCO are `person`, `bicycle`, `car`, `motorcycle`, `bus`, `train`, and `truck`. Cityscapes `rider` is excluded because COCO has no equivalent class.
+
+## Files
+
+- `cityscapes_parts_1_2.py` - clean and distorted evaluation.
+- `cityscapes_parts_3_4.py` - restoration, robust YOLO fine-tuning, and evaluation.
+- `setup_cuda.ps1` - installs a CUDA-enabled PyTorch wheel and performs a real GPU smoke test.
+- `tests/` - unit and lightweight orchestration tests that do not download model weights.
 
 ## Dataset setup
 
-Cityscapes requires a free account and acceptance of its academic/non-commercial terms. The script does not download or redistribute the dataset.
-
-1. Register at [cityscapes-dataset.com](https://www.cityscapes-dataset.com/).
-2. Download:
-   - `leftImg8bit_trainvaltest.zip`
-   - `gtFine_trainvaltest.zip`
-3. Extract both archives under one directory.
-
-The expected structure is:
+Download `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` from the [Cityscapes website](https://www.cityscapes-dataset.com/), then extract both under the same directory. This repository expects the existing local layout:
 
 ```text
-CITYSCAPES_ROOT/
-├── leftImg8bit/
-│   ├── train/<city>/*_leftImg8bit.png
-│   └── val/<city>/*_leftImg8bit.png
-└── gtFine/
-    ├── train/<city>/
-    │   ├── *_gtFine_labelIds.png
-    │   └── *_gtFine_instanceIds.png
-    └── val/<city>/
-        ├── *_gtFine_labelIds.png
-        └── *_gtFine_instanceIds.png
+data/cityscapes/
+|-- leftImg8bit/
+|   |-- train/<city>/*_leftImg8bit.png
+|   `-- val/<city>/*_leftImg8bit.png
+`-- gtFine/
+    |-- train/<city>/*_gtFine_labelIds.png and *_instanceIds.png
+    `-- val/<city>/*_gtFine_labelIds.png and *_instanceIds.png
 ```
 
-The official archive provides raw `labelIds` masks. The loader converts them in memory to the 19 contiguous train IDs used by SegFormer and the metrics. If a prepared dataset already contains `labelTrainIds` masks, those are detected and preferred automatically.
+Official raw `labelIds` are converted in memory to the 19 contiguous Cityscapes train IDs. Prepared `labelTrainIds` masks are also accepted. Use the validation split for reported metrics because Cityscapes test labels are withheld.
 
-Use the validation split for reported metrics. Cityscapes test labels are withheld for its evaluation server.
+## Installation and CUDA
 
-## Environment installation
-
-Python 3.10 or newer is recommended. From PowerShell:
+Python 3.10 or newer and an NVIDIA GPU/driver are recommended. In PowerShell, from this project directory:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\setup_cuda.ps1
 ```
 
-PyTorch installation can depend on the available GPU. If you want CUDA acceleration, install the appropriate PyTorch build from [pytorch.org](https://pytorch.org/get-started/locally/) before installing the remaining requirements.
+`setup_cuda.ps1` replaces a CPU-only PyTorch installation with the official CUDA 13.0 wheel and verifies `torch.cuda.is_available()`, the GPU name, GPU memory, and an FP16 matrix operation. CUDA 13.0 is appropriate for the RTX 4060 and the installed recent NVIDIA driver. To select another supported wheel:
 
-On their first use, Ultralytics and Transformers download the pretrained `yolov8n.pt` and `nvidia/segformer-b0-finetuned-cityscapes-1024-1024` weights.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_cuda.ps1 -CudaWheel cu126
+```
 
-## Running the project
+Confirm the exact interpreter before a long run:
 
-### Fast pipeline check
+```powershell
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
 
-This runs four deterministic validation images and two levels per distortion:
+The project uses CUDA through PyTorch, Transformers, and Ultralytics. CuPy is not required: the expensive SegFormer, YOLO inference, and YOLO training already run on the GPU, while the small OpenCV preprocessing/restoration operations remain on the CPU. FP16 is enabled by default on CUDA; pass `--no-half` only if a model or GPU has a precision issue.
+
+Pretrained weights are downloaded automatically on first use:
+
+- `yolov8n.pt`
+- `nvidia/segformer-b0-finetuned-cityscapes-1024-1024`
+
+## Quick CUDA test of all four parts
+
+Run these before a complete experiment:
 
 ```powershell
 python cityscapes_parts_1_2.py `
-  --dataset-root ".\data\cityscapes" `
-  --output-dir outputs `
-  --quick
+  --dataset-root .\data\cityscapes `
+  --output-dir .\outputs `
+  --part both `
+  --quick `
+  --device cuda
+
+python cityscapes_parts_3_4.py `
+  --dataset-root .\data\cityscapes `
+  --output-dir .\outputs_parts_3_4 `
+  --artifacts-dir .\artifacts `
+  --part both `
+  --quick `
+  --device cuda
 ```
 
-### Complete Parts 1 and 2 experiment
+Quick mode uses four evaluation images and two levels per distortion. Part 4 prepares 32 training images and 8 validation images and trains for one epoch. It verifies the complete path but is not intended to produce final report scores.
 
-This runs all 500 validation images and all five levels of each distortion:
+## Complete experiment
+
+### Parts 1 and 2
 
 ```powershell
 python cityscapes_parts_1_2.py `
-  --dataset-root ".\data\cityscapes" `
-  --output-dir outputs `
+  --dataset-root .\data\cityscapes `
+  --output-dir .\outputs_full `
   --part both `
   --split val `
-  --max-samples 0
+  --max-samples 0 `
+  --device cuda
 ```
 
-The complete experiment evaluates 500 clean images plus 10,000 distorted images. A CUDA-capable GPU is strongly recommended. Run `--quick` first to verify the installation and dataset paths.
+This evaluates 500 clean images plus 10,000 distorted images: four distortions, five levels, and 500 images.
 
-### Part 1 only
+### Parts 3 and 4
 
 ```powershell
-python cityscapes_parts_1_2.py `
-  --dataset-root ".\data\cityscapes" `
-  --part 1
+python cityscapes_parts_3_4.py `
+  --dataset-root .\data\cityscapes `
+  --output-dir .\outputs_parts_3_4_full `
+  --artifacts-dir .\artifacts `
+  --part both `
+  --max-samples 0 `
+  --device cuda `
+  --part4-epochs 20 `
+  --part4-image-size 640 `
+  --part4-batch 8
 ```
 
-Selecting `--part 2` still computes the clean Part 1 reference first because ORB, Canny, and degradation comparisons require it.
+An 8 GB RTX 4060 should normally handle YOLOv8n at batch 8. If CUDA reports out-of-memory, rerun with `--part4-batch 4`. When both parts run in one command, Part 3 models are released and the CUDA cache is cleared before Part 4 training.
 
-Useful options:
+Part 4 training artifacts can be large and are intentionally excluded by `.gitignore`. The prepared dataset is deterministic and is reused on later runs with the same recipe. Use `--rebuild-training-data` to regenerate it.
+
+To evaluate an existing fine-tuned checkpoint without retraining:
+
+```powershell
+python cityscapes_parts_3_4.py `
+  --dataset-root .\data\cityscapes `
+  --part 4 `
+  --device cuda `
+  --fine-tuned-weights .\artifacts\part4\training_runs\cityscapes_robust_yolov8n\weights\best.pt
+```
+
+## Part 1 - clean evaluation
+
+For every clean validation image, the script loads RGB, semantic, and instance annotations; creates the slide-style overlays; runs ORB, Canny, YOLO, and SegFormer; and evaluates predictions against ground truth. Clean Canny maps are packed to one bit per pixel before Part 2, avoiding roughly one gigabyte of unnecessary in-memory edge maps on the full split.
+
+## Part 2 - controlled distortions
+
+| Name in code | Default levels | Interpretation |
+|---|---|---|
+| `GaussNoise` | sigma 5, 10, 20, 35, 50 | additive RGB Gaussian noise |
+| `SevereJPEG` | quality 80, 60, 40, 20, 5 | lower quality is more severe |
+| `LowLight` | factor 0.80, 0.60, 0.40, 0.25, 0.10 | lower brightness is more severe |
+| `MotionBlur` | kernel 3, 5, 9, 15, 25 | longer fixed-angle motion kernel is more severe |
+
+The script reruns all four methods at every level and measures actual image SNR:
 
 ```text
---max-samples N          Deterministic sample limit; 0 means the complete split
---device auto            Automatically use CUDA, MPS, or CPU
---device cuda:0          Select a particular CUDA device
---nfeatures 800          Maximum ORB features, matching the slides
---canny-low-threshold 100
---canny-high-threshold 200
---canny-blur-kernel 5
---canny-tolerance-radius 2
---yolo-model yolov8n.pt  Ultralytics detection checkpoint
---gallery-samples 4      Number of clean qualitative examples
+SNR(dB) = 10 * log10(mean(clean^2) / mean((clean - test)^2))
 ```
 
-Run `python cityscapes_parts_1_2.py --help` for every option.
+## Part 3 - restoration and reevaluation
 
-## Part 1: clean-image evaluation
+Each distorted image is restored by a method suited to its corruption, then ORB, Canny, SegFormer, and YOLO are rerun on both distorted and restored versions.
 
-For every selected clean image, the script:
+| Distortion | Restoration method |
+|---|---|
+| Gaussian noise | colored non-local means plus bilateral filtering |
+| JPEG artifacts | bilateral filtering on the luminance channel |
+| Low light | gamma lifting plus CLAHE local contrast enhancement |
+| Motion blur | severity-scaled unsharp deblurring |
 
-1. Loads the RGB image, converts the official `labelIds` semantic mask to train IDs, and loads the instance-ID mask.
-2. Produces a Cityscapes-color semantic overlay.
-3. Detects and draws up to 800 ORB keypoints.
-4. Detects Canny edges after fixed Gaussian pre-smoothing.
-5. Runs pretrained YOLOv8n.
-6. Runs the Cityscapes SegFormer-B0 checkpoint.
-7. Computes semantic metrics against the 19-class ground truth.
-8. Derives ground-truth boxes from the instance mask and evaluates YOLO.
+The result tables include distorted/restored SNR, ORB retention, Canny F1, SegFormer mIoU, YOLO mAP, per-class metrics, and the gain or loss caused by restoration. A restoration is not assumed to help; the measured comparison is the result.
 
-The seven object classes shared directly by Cityscapes and COCO are evaluated:
+## Part 4 - distortion-robust YOLO
 
-- `person`
-- `bicycle`
-- `car`
-- `motorcycle`
-- `bus`
-- `train`
-- `truck`
+Part 4 follows the slide-style supervised fine-tuning sequence:
 
-Cityscapes `rider` is excluded because COCO has no direct rider class. It is not incorrectly merged into `person`.
+1. Read Cityscapes train and validation images and instance masks.
+2. Convert the seven shared instance classes to normalized YOLO labels.
+3. Deterministically assign clean or distorted training conditions; the default clean fraction is 20%.
+4. Fine-tune pretrained YOLOv8n with CUDA automatic mixed precision.
+5. Evaluate the original pretrained detector and fine-tuned detector on clean images and every distortion level.
+6. Report clean accuracy, robustness by SNR, per-class AP, and fine-tuning gains.
 
-## Part 2: distorted-image evaluation
+The full train split is used when `--part4-train-samples 0`; the full validation split is used when `--part4-val-samples 0`. `--max-samples` separately controls the final Part 3/4 evaluation set.
 
-Each clean image is transformed at five intensity levels:
-
-| Distortion name in code | Levels | Meaning |
-|---|---:|---|
-| `GaussNoise` | sigma = 5, 10, 20, 35, 50 | Additive RGB Gaussian noise in the 0-255 pixel domain |
-| `SevereJPEG` | quality = 80, 60, 40, 20, 5 | JPEG encoding quality; lower is more severe |
-| `LowLight` | factor = 0.80, 0.60, 0.40, 0.25, 0.10 | Multiplicative brightness; lower is darker |
-| `MotionBlur` | kernel = 3, 5, 9, 15, 25 | Linear motion point-spread function at a fixed 15-degree direction; longer is more severe |
-
-For each distorted image, the script reruns all four methods and computes:
-
-- Actual SNR relative to the clean image.
-- ORB keypoint and spatial match retention.
-- Canny edge-pixel retention and tolerant precision, recall, and F1.
-- Segmentation IoU against the unchanged semantic ground truth.
-- Detection AP against the unchanged instance-derived boxes.
-- Per-class and aggregate results for every distortion level.
-
-SNR is calculated exactly in the form used in the slides:
+## Outputs
 
 ```text
-SNR(dB) = 10 * log10(mean(clean²) / mean((clean - distorted)²))
+outputs_full/
+|-- run_manifest.json
+|-- part1/
+|   |-- clean_summary.json
+|   |-- clean_per_image.csv
+|   |-- segmentation_per_class.csv
+|   `-- detection_per_class.csv
+`-- part2/
+    |-- distorted_summary.json and .csv
+    |-- distorted_per_image.csv
+    |-- segmentation_per_class.csv
+    |-- detection_per_class.csv
+    `-- figures/
+
+outputs_parts_3_4_full/
+|-- run_manifest_parts_3_4.json
+|-- part3/
+|   |-- restoration_summary.json and .csv
+|   |-- restoration_per_image.csv
+|   |-- segmentation_per_class.csv
+|   |-- detection_per_class.csv
+|   `-- figures/restoration_grid.png and restored_performance.png
+`-- part4/
+    |-- fine_tuning_summary.json and .csv
+    |-- detection_per_class.csv
+    |-- run_summary.json
+    `-- figures/fine_tuning_per_snr.png
 ```
 
-## Output files
+## Reproducibility
 
-```text
-outputs/
-├── run_manifest.json
-├── part1/
-│   ├── clean_summary.json
-│   ├── clean_per_image.csv
-│   ├── segmentation_per_class.csv
-│   ├── detection_per_class.csv
-│   └── figures/
-│       └── clean_predictions.png
-└── part2/
-    ├── distorted_summary.json
-    ├── distorted_summary.csv
-    ├── distorted_per_image.csv
-    ├── segmentation_per_class.csv
-    ├── detection_per_class.csv
-    └── figures/
-        ├── distortion_grid.png
-        ├── distorted_predictions.png
-        └── performance_per_snr.png
-```
+- Default random seed: `7`, matching the slide example.
+- Sample selection, distortions, training-condition assignment, and Ultralytics training seed are deterministic.
+- Run manifests record the full configuration and checkpoint path.
+- Low confidence (`0.001`) is used for YOLO AP curves so they are not truncated.
+- Semantic void label `255` is ignored.
+- AP uses 101-point interpolation at IoU thresholds 0.50 to 0.95.
 
-The run manifest records the complete configuration used for reproducibility. CSV files are suitable for additional plots or report tables, while the generated figures can be embedded directly in the course README or presentation.
-
-## Metric details
-
-### ORB
-
-Descriptors are matched with a Hamming-distance brute-force matcher and Lowe's ratio test. Because all four distortions preserve image geometry, a match is retained only when the matched keypoints are within three pixels of one another.
-
-```text
-match retention = spatially verified matches / clean keypoints
-inlier ratio    = spatially verified matches / ratio-test matches
-```
-
-### Canny edge detection
-
-Canny uses fixed thresholds (`100`, `200`) and a fixed 5x5 Gaussian pre-filter for clean and distorted images. Parameters are not retuned by distortion because doing so would hide robustness loss. Cityscapes does not provide edge annotations, so the clean Canny map is the reference for distorted-image evaluation. A two-pixel dilation tolerance permits small localization shifts. Precision, recall, F1, and edge-pixel retention are reported.
-
-Motion blur uses normalized odd-length kernels, reflection padding, and a fixed 15-degree direction. Holding direction constant isolates kernel length as the experimental severity variable and avoids artificial dark image borders.
-
-### Semantic segmentation
-
-Predicted SegFormer logits are bilinearly resized to the original Cityscapes resolution. Void ground-truth pixels (`255`) are ignored. IoU is computed per class and then averaged only over classes present in the evaluated split/subset.
-
-### Object detection
-
-For each Cityscapes instance, its visible-pixel extent becomes an `xyxy` ground-truth box. Predictions are matched greedily by class and confidence. AP uses 101-point interpolation at IoU thresholds 0.50 through 0.95 in increments of 0.05.
-
-YOLO inference uses a low confidence threshold (`0.001`) for AP calculation so the precision-recall curve is not truncated. Qualitative plots use `0.25`, matching the course slides.
-
-## Reproducibility and scope notes
-
-- The default seed is `7`, matching the slide example.
-- Sample selection and all distortions are deterministic.
-- No image restoration or enhancement is performed.
-- No model is trained or fine-tuned.
-- The code measures robustness only on clean and synthetically distorted Cityscapes images.
-- ORB and Canny are classical low-level methods; SegFormer and YOLO satisfy the deep-learning requirement.
-
-## Verification
-
-The unit tests exercise dataset discovery, mask-to-box conversion, all distortions, Canny consistency, SNR, semantic metrics, box IoU, and detection AP without downloading model weights:
+## Tests
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
+The tests cover dataset discovery, Cityscapes ID mapping, all distortions, all restorations, packed Canny references, edge consistency, SNR, segmentation, detection AP, YOLO label conversion, deterministic training assignment, and pipeline output creation.
+
 ## References
 
 - [Cityscapes dataset](https://www.cityscapes-dataset.com/)
-- [Cityscapes benchmark metrics](https://www.cityscapes-dataset.com/benchmarks/)
-- [SegFormer-B0 fine-tuned on Cityscapes](https://huggingface.co/nvidia/segformer-b0-finetuned-cityscapes-1024-1024)
-- [Ultralytics Python API](https://docs.ultralytics.com/usage/python/)
+- [SegFormer-B0 Cityscapes checkpoint](https://huggingface.co/nvidia/segformer-b0-finetuned-cityscapes-1024-1024)
+- [Ultralytics training API](https://docs.ultralytics.com/modes/train/)
+- [Official PyTorch CUDA installation](https://pytorch.org/get-started/locally/)

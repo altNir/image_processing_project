@@ -168,6 +168,7 @@ class ExperimentConfig:
     max_samples: int = 0
     seed: int = 7
     device: str = "auto"
+    use_half: bool = True
     nfeatures: int = 800
     orb_ratio_threshold: float = 0.75
     orb_spatial_threshold: float = 3.0
@@ -545,11 +546,19 @@ def yolo_overlay(
     img_pil: Image.Image,
     model: Any,
     conf: float = 0.25,
+    device: str | None = None,
+    use_half: bool = False,
 ) -> tuple[np.ndarray, Any]:
     """Run and draw YOLO predictions, following the slide function."""
 
     cv2 = _cv2()
-    result = model.predict(img_pil, conf=conf, verbose=False)[0]
+    result = model.predict(
+        img_pil,
+        conf=conf,
+        verbose=False,
+        device=device,
+        half=bool(use_half and device and device.startswith("cuda")),
+    )[0]
     plotted_bgr = result.plot()
     return cv2.cvtColor(plotted_bgr, cv2.COLOR_BGR2RGB), result
 
@@ -559,8 +568,17 @@ def yolo_detections(
     model: Any,
     image_id: str,
     conf: float = 0.001,
+    device: str | None = None,
+    use_half: bool = False,
 ) -> list[Detection]:
-    result = model.predict(img_pil, conf=conf, max_det=300, verbose=False)[0]
+    result = model.predict(
+        img_pil,
+        conf=conf,
+        max_det=300,
+        verbose=False,
+        device=device,
+        half=bool(use_half and device and device.startswith("cuda")),
+    )[0]
     if result.boxes is None or len(result.boxes) == 0:
         return []
     boxes = result.boxes.xyxy.detach().cpu().numpy()
@@ -592,6 +610,7 @@ def predict_segmentation(
     processor: Any,
     model: Any,
     device: str,
+    use_half: bool = False,
 ) -> np.ndarray:
     """Predict a 0..18 Cityscapes train-ID mask with SegFormer."""
 
@@ -600,7 +619,12 @@ def predict_segmentation(
 
     inputs = processor(images=img_pil, return_tensors="pt")
     inputs = {name: tensor.to(device) for name, tensor in inputs.items()}
-    with torch.inference_mode():
+    cuda_half = bool(use_half and device.startswith("cuda"))
+    with torch.inference_mode(), torch.autocast(
+        device_type="cuda",
+        dtype=torch.float16,
+        enabled=cuda_half,
+    ):
         logits = model(**inputs).logits
     upsampled = functional.interpolate(
         logits,
@@ -1127,6 +1151,11 @@ def draw_ground_truth_boxes(image: Image.Image, boxes: Sequence[Detection]) -> I
 def select_device(requested: str) -> str:
     import torch
 
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA was requested but torch.cuda.is_available() is False. Install the CUDA-enabled "
+            "PyTorch wheel with setup_cuda.ps1, then retry."
+        )
     if requested != "auto":
         return requested
     if torch.cuda.is_available():
@@ -1152,6 +1181,10 @@ def load_models(config: ExperimentConfig) -> tuple[Any, Any, Any, str]:
     segmenter = SegformerForSemanticSegmentation.from_pretrained(config.segformer_model)
     segmenter.to(device)
     segmenter.eval()
+    LOGGER.info(
+        "Inference precision: %s",
+        "FP16 autocast" if config.use_half and device.startswith("cuda") else "FP32",
+    )
     return detector, processor, segmenter, device
 
 
@@ -1159,7 +1192,22 @@ def load_models(config: ExperimentConfig) -> tuple[Any, Any, Any, str]:
 class CleanReference:
     sample: CityscapesSample
     gt_detections: list[Detection]
-    clean_edges: np.ndarray
+    clean_edges_packed: np.ndarray
+    clean_edges_shape: tuple[int, int]
+
+
+def pack_binary_map(binary_map: np.ndarray) -> np.ndarray:
+    """Pack a binary image to one bit per pixel for low-memory clean references."""
+
+    return np.packbits((np.asarray(binary_map) > 0).reshape(-1))
+
+
+def unpack_binary_map(packed: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """Restore a packed binary image as an OpenCV-style 0/255 uint8 map."""
+
+    count = int(shape[0] * shape[1])
+    bits = np.unpackbits(np.asarray(packed, dtype=np.uint8), count=count)
+    return (bits.reshape(shape) * 255).astype(np.uint8)
 
 
 def run_part1(
@@ -1190,8 +1238,12 @@ def run_part1(
             detector,
             sample.sample_id,
             conf=config.yolo_eval_confidence,
+            device=device,
+            use_half=config.use_half,
         )
-        segmentation = predict_segmentation(image, processor, segmenter, device)
+        segmentation = predict_segmentation(
+            image, processor, segmenter, device, use_half=config.use_half
+        )
         segmentation_accumulator.update(segmentation, label)
         image_ious = compute_ious(segmentation, label)
         clean_orb = measure_orb_matching(
@@ -1232,14 +1284,21 @@ def run_part1(
             CleanReference(
                 sample=sample,
                 gt_detections=gt_detections,
-                clean_edges=clean_edges,
+                clean_edges_packed=pack_binary_map(clean_edges),
+                clean_edges_shape=clean_edges.shape,
             )
         )
 
         if len(gallery) < config.gallery_samples:
             orb_image, keypoints, _ = orb_overlay(image, nfeatures=config.nfeatures)
             canny_image = canny_overlay(image, clean_edges)
-            yolo_image, result = yolo_overlay(image, detector, conf=config.yolo_visual_confidence)
+            yolo_image, result = yolo_overlay(
+                image,
+                detector,
+                conf=config.yolo_visual_confidence,
+                device=device,
+                use_half=config.use_half,
+            )
             gallery.append(
                 {
                     "sample_id": sample.sample_id,
@@ -1367,8 +1426,11 @@ def run_part2(
                     high_threshold=config.canny_high_threshold,
                     blur_kernel=config.canny_blur_kernel,
                 )
+                clean_edges = unpack_binary_map(
+                    reference.clean_edges_packed, reference.clean_edges_shape
+                )
                 canny_metrics = evaluate_canny_edges(
-                    reference.clean_edges,
+                    clean_edges,
                     distorted_edges,
                     tolerance_radius=config.canny_tolerance_radius,
                 )
@@ -1377,6 +1439,7 @@ def run_part2(
                     processor,
                     segmenter,
                     device,
+                    use_half=config.use_half,
                 )
                 segmentation_accumulator.update(segmentation, clean_label)
                 image_ious = compute_ious(segmentation, clean_label)
@@ -1385,6 +1448,8 @@ def run_part2(
                     detector,
                     reference.sample.sample_id,
                     conf=config.yolo_eval_confidence,
+                    device=device,
+                    use_half=config.use_half,
                 )
                 predictions.extend(image_predictions)
                 ground_truth.extend(reference.gt_detections)
@@ -1427,6 +1492,8 @@ def run_part2(
                         distorted_image,
                         detector,
                         conf=config.yolo_visual_confidence,
+                        device=device,
+                        use_half=config.use_half,
                     )
                     gallery_rows.append(
                         {
@@ -1564,6 +1631,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, cuda:0, or mps")
+    parser.add_argument(
+        "--no-half",
+        action="store_true",
+        help="Disable CUDA FP16 autocast and YOLO half precision",
+    )
     parser.add_argument("--nfeatures", type=int, default=800)
     parser.add_argument("--canny-low-threshold", type=int, default=100)
     parser.add_argument("--canny-high-threshold", type=int, default=200)
@@ -1598,6 +1670,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_samples=max_samples,
         seed=args.seed,
         device=args.device,
+        use_half=not args.no_half,
         nfeatures=args.nfeatures,
         canny_low_threshold=args.canny_low_threshold,
         canny_high_threshold=args.canny_high_threshold,

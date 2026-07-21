@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -56,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--part4-workers", type=int, default=4)
     parser.add_argument("--part4-clean-fraction", type=float, default=0.20)
     parser.add_argument("--rebuild-training-data", action="store_true")
+    parser.add_argument(
+        "--no-reuse-part2",
+        action="store_true",
+        help="Recompute distorted Part 3 baselines instead of reusing a complete matching Part 2 run",
+    )
     parser.add_argument("--fine-tuned-weights", type=Path)
     return parser
 
@@ -105,6 +111,7 @@ def _parts34_config(
         part4_workers=args.part4_workers,
         part4_clean_fraction=args.part4_clean_fraction,
         rebuild_training_data=args.rebuild_training_data,
+        reuse_part2_results=not args.no_reuse_part2,
         fine_tuned_weights=args.fine_tuned_weights,
     )
 
@@ -113,19 +120,30 @@ def _run_parts34(config: Parts34Config, part: str) -> dict[str, Any]:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     device = select_device(config.device)
     result: dict[str, Any] = {}
+    elapsed: dict[str, float] = {}
+    overall_started = time.perf_counter()
     if part in {"3", "all"}:
+        started = time.perf_counter()
         detector, processor, segmenter, device = load_models(to_base_config(config))
         result["part3"] = run_part3(config, detector, processor, segmenter, device)
+        elapsed["part3"] = time.perf_counter() - started
         del detector, processor, segmenter
         if device.startswith("cuda"):
             import torch
 
             torch.cuda.empty_cache()
     if part in {"4", "all"}:
+        started = time.perf_counter()
         result["part4"] = run_part4(config, device)
+        elapsed["part4"] = time.perf_counter() - started
     write_json(
         config.output_dir / "run_manifest_parts_3_4.json",
-        {"config": asdict(config), "result": result},
+        {
+            "elapsed_seconds": time.perf_counter() - overall_started,
+            "elapsed_seconds_by_part": elapsed,
+            "config": asdict(config),
+            "result": result,
+        },
     )
     return result
 

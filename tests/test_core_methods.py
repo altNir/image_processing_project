@@ -201,6 +201,21 @@ class DetectionTests(unittest.TestCase):
         self.assertAlmostEqual(summary["map_50"], 1.0)
         self.assertAlmostEqual(float(rows[0]["precision_50"]), 0.5)
 
+    def test_operating_confidence_reports_practical_precision(self) -> None:
+        gt = [Detection("image", "car", (0, 0, 10, 10))]
+        predictions = [
+            Detection("image", "car", (0, 0, 10, 10), score=0.9),
+            Detection("image", "car", (0, 0, 10, 10), score=0.1),
+        ]
+        summary, rows = evaluate_detections(
+            predictions, gt, classes=("car",), operating_confidence=0.25
+        )
+        self.assertAlmostEqual(float(rows[0]["precision_50"]), 0.5)
+        self.assertAlmostEqual(
+            float(rows[0]["precision_50_at_operating_confidence"]), 1.0
+        )
+        self.assertEqual(summary["operating_predicted_objects"], 1.0)
+
 
 class PipelineOrchestrationTests(unittest.TestCase):
     def test_parts_1_and_2_write_expected_artifacts(self) -> None:

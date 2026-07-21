@@ -35,15 +35,13 @@ def low_light(image_rgb: np.ndarray, brightness: float) -> np.ndarray:
     return (image_rgb.astype(np.float32) * float(brightness)).clip(0, 255).astype(np.uint8)
 
 
-def motion_blur(
-    image_rgb: np.ndarray, kernel_size: int, angle_degrees: float = 15.0
-) -> np.ndarray:
-    """Apply a normalized fixed-angle motion point-spread function."""
+def motion_blur_kernel(kernel_size: int, angle_degrees: float = 15.0) -> np.ndarray:
+    """Construct the normalized motion point-spread function used by Parts 2-3."""
 
     if kernel_size < 1 or kernel_size % 2 == 0:
         raise ValueError("Motion-blur kernel_size must be a positive odd integer")
     if kernel_size == 1:
-        return np.asarray(image_rgb, dtype=np.uint8).copy()
+        return np.ones((1, 1), dtype=np.float32)
     cv2 = cv2_module()
     kernel = np.zeros((kernel_size, kernel_size), dtype=np.float32)
     center = (kernel_size - 1) / 2.0
@@ -61,6 +59,18 @@ def motion_blur(
     if kernel_sum <= 0:
         kernel[int(center), int(center)], kernel_sum = 1.0, 1.0
     kernel /= kernel_sum
+    return kernel
+
+
+def motion_blur(
+    image_rgb: np.ndarray, kernel_size: int, angle_degrees: float = 15.0
+) -> np.ndarray:
+    """Apply a normalized fixed-angle motion point-spread function."""
+
+    kernel = motion_blur_kernel(kernel_size, angle_degrees)
+    if kernel_size == 1:
+        return np.asarray(image_rgb, dtype=np.uint8).copy()
+    cv2 = cv2_module()
     return np.asarray(
         cv2.filter2D(
             np.asarray(image_rgb, dtype=np.uint8), -1, kernel, borderType=cv2.BORDER_REFLECT101

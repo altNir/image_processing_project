@@ -45,12 +45,12 @@ Cityscapes instance masks are converted to visible object bounding boxes. Detect
 
 | Distortion | Part 3 restoration method |
 |---|---|
-| Gaussian noise | colored non-local means followed by bilateral filtering |
-| JPEG compression | luminance-channel bilateral filtering |
-| Low light | gamma lifting followed by CLAHE |
-| Motion blur | severity-scaled unsharp filtering |
+| Gaussian noise | severity-scaled colored non-local means; bilateral cleanup only at high sigma |
+| JPEG compression | severity-scaled luminance bilateral filtering blended with the input |
+| Low light | severity-scaled gamma lifting and CLAHE, blended conservatively at mild levels |
+| Motion blur | regularized Wiener deconvolution using the known synthetic motion kernel |
 
-Restoration is evaluated rather than assumed to help. A negative SNR or task-metric gain is preserved in the output because aggressive restoration can remove useful features or create artifacts.
+Restoration parameters are deterministic functions of distortion severity. This avoids the strong over-processing seen when one setting was used for every level. Restoration is still evaluated rather than assumed to help: negative SNR or task-metric gains remain in the output.
 
 ## Preliminary results: 20-image validation run
 
@@ -86,7 +86,7 @@ The results expose different failure modes: low light and motion blur strongly a
 
 ### Part 3: restoration
 
-Restoration helps most when degradation is severe, but the fixed restoration strengths can over-process mild images.
+These tracked values came from the earlier fixed-strength smoke test. They motivated the current severity-aware restoration implementation and must not be reused as final Part 3 results.
 
 | Condition | SNR before -> after | Segmentation mIoU before -> after | Detection mAP before -> after |
 |---|---:|---:|---:|
@@ -95,7 +95,7 @@ Restoration helps most when degradation is severe, but the fixed restoration str
 | Low light, factor 0.10 | 0.88 -> 9.93 dB | 0.4682 -> 0.5131 | 0.0959 -> 0.2044 |
 | Motion blur, kernel 25 | 17.82 -> 17.02 dB | 0.4741 -> 0.4755 | 0.1157 -> 0.1036 |
 
-For example, severe low-light restoration substantially improved image quality, segmentation, and detection. Conversely, mild Gaussian denoising reduced ORB retention and segmentation quality because the filter removed useful detail. This is a measured limitation of the current fixed-parameter restoration design.
+For example, severe low-light restoration substantially improved image quality, segmentation, and detection. Conversely, the old mild Gaussian setting removed useful detail. The current code scales restoration strength by level; a new final run is required to measure the corrected behavior.
 
 ![Distorted and restored performance](outputs_20_images/part3/figures/restored_performance.png)
 
@@ -183,13 +183,13 @@ Omitting `--max-samples` uses all 500 validation images. Part 4 defaults to all 
 ```powershell
 python .\main.py `
   --dataset-root .\data\cityscapes `
-  --output-dir .\outputs_full `
+  --output-dir .\outputs_final `
   --artifacts-dir .\artifacts `
   --part all `
   --device cuda
 ```
 
-The full pipeline is long. Running the parts separately is safer because completed result files and prepared Part 4 data can be reused.
+The full pipeline is long. Running the parts separately is safer. Each completed severity variant is checkpointed, Part 3 reuses a complete matching Part 2 baseline by default, and prepared Part 4 data is cached. Use `--no-reuse-part2` only for an independent recomputation.
 
 ### Evaluate an existing fine-tuned checkpoint
 
@@ -230,6 +230,7 @@ python .\main.py `
 | `--part4-batch` | `8` | Training batch size; reduce it after a CUDA out-of-memory error |
 | `--part4-clean-fraction` | `0.20` | Fraction of clean images in the robust training mixture |
 | `--rebuild-training-data` | off | Recreate the cached Part 4 training dataset |
+| `--no-reuse-part2` | off | Recompute distorted Part 3 baselines instead of reusing a complete matching Part 2 run |
 
 Run `python .\main.py --help` for every available option.
 
@@ -275,6 +276,8 @@ Useful tracked examples:
 - [Part 4 smoke-test results](outputs_20_images/part4/fine_tuning_summary.csv)
 - [Complete run configuration](outputs_20_images/run_manifest_parts_3_4.json)
 
+`outputs_5_images/` and `outputs_20_images/` are smoke tests. `incomplete_old_run/` is an archived pre-refactor run with a complete 500-image Part 1 but incomplete later parts; it is retained only for provenance and must not be combined with current results. Final results belong in `outputs_final/`.
+
 ## Reproducibility and evaluation design
 
 - Sample selection and every synthetic distortion are deterministic under `--seed`.
@@ -282,8 +285,11 @@ Useful tracked examples:
 - Part 2 and Part 3 reuse the same image IDs and distortion seeds for paired comparisons.
 - Semantic void label `255` is ignored.
 - Detection uses a low confidence floor and 101-point AP interpolation at IoU thresholds 0.50 through 0.95.
+- Detection also reports precision, recall, and F1 at confidence `0.25`; the terminal precision from the `0.001` AP floor is retained only for audit compatibility.
 - Part 4 uses Cityscapes ground-truth instance masks, not model-generated pseudo-labels.
 - Part 4 training and validation images come from separate Cityscapes splits.
+- Prepared Part 4 images use PNG so clean and non-JPEG conditions do not acquire unintended JPEG artifacts.
+- The Part 4 dataset manifest records class-instance and distortion-condition counts before training.
 - Manifests store the configuration and prepared-dataset identity for later auditing.
 
 SNR is computed as:
@@ -337,16 +343,16 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, re
 
 ## Runtime estimate
 
-The 20-image Parts 1-4 run took approximately 21 minutes on the tested machine. Scaling only the evaluation workload from 20 to 500 images gives about 8.8 hours. Full Part 4 training is not linear with that estimate because it expands from 20 training images and 5 epochs to 2,975 images and 20 epochs.
+The earlier 20-image Parts 1-4 run took approximately 21 minutes on the tested machine. A naive 25x extrapolation gives 8.8 hours, but the current Part 3 reuse path removes duplicate distorted-image inference. Until a short calibration is run on the final machine, allow roughly 5-8 hours for Parts 1-3 on 500 images.
 
-For planning on the same machine, allow roughly 9.5 to 11 hours for the complete pipeline. Part 3 is the largest evaluation bottleneck because OpenCV non-local-means restoration runs on the CPU. Actual time depends on GPU model, CUDA installation, disk speed, cached model weights, and thermal limits.
+Part 4 adds preparation of 2,975 training images, 20 YOLO epochs, and evaluation of the pretrained and fine-tuned detectors over 21 conditions. The RTX 5090 available for the final run should make neural inference and YOLO training comparatively fast; Part 3 remains CPU-bound because OpenCV non-local-means runs on the CPU. Actual duration must be calibrated after the Cityscapes data is available locally.
 
 ## Assumptions and known limitations
 
 - The tracked 20-image results are preliminary and have high sampling uncertainty.
 - The full 500-image validation run has not yet been committed.
 - The 20-image Part 4 checkpoint is a failed smoke-test model, not a final result.
-- Fixed restoration parameters can over-process mildly distorted images; Part 3 therefore reports both positive and negative gains.
+- Severity-aware restoration reduces over-processing but cannot guarantee that every enhancement improves every downstream task.
 - The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
 - Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.
 - Some shared detection classes may be absent from a small sample; only classes with ground-truth instances contribute to mAP.

@@ -82,6 +82,14 @@ class ExperimentConfig:
         self.output_dir = Path(self.output_dir)
         if self.distortion_levels is None:
             self.distortion_levels = dict(DEFAULT_DISTORTION_LEVELS)
+        if self.max_samples < 0 or self.nfeatures <= 0 or self.gallery_samples < 0:
+            raise ValueError("Sample limits/gallery size must be non-negative and nfeatures positive")
+        if not 0 <= self.canny_low_threshold < self.canny_high_threshold:
+            raise ValueError("Canny thresholds must satisfy 0 <= low < high")
+        if self.canny_blur_kernel < 1 or self.canny_blur_kernel % 2 == 0:
+            raise ValueError("canny_blur_kernel must be a positive odd integer")
+        if self.canny_tolerance_radius < 0:
+            raise ValueError("canny_tolerance_radius must be non-negative")
 
 
 @dataclass
@@ -114,6 +122,7 @@ class Parts34Config:
     part4_workers: int = 4
     part4_clean_fraction: float = 0.20
     rebuild_training_data: bool = False
+    reuse_part2_results: bool = True
     fine_tuned_weights: Path | None = None
 
     def __post_init__(self) -> None:
@@ -126,6 +135,20 @@ class Parts34Config:
             self.distortion_levels = dict(DEFAULT_DISTORTION_LEVELS)
         if not 0.0 <= self.part4_clean_fraction <= 1.0:
             raise ValueError("part4_clean_fraction must be between 0 and 1")
+        if self.max_samples < 0 or self.part4_train_samples < 0 or self.part4_val_samples < 0:
+            raise ValueError("Sample limits must be non-negative")
+        if self.part4_epochs <= 0 or self.part4_image_size <= 0:
+            raise ValueError("Part 4 epochs and image size must be positive")
+        if self.part4_batch != -1 and self.part4_batch <= 0:
+            raise ValueError("Part 4 batch must be positive or -1 for automatic sizing")
+        if self.part4_workers < 0:
+            raise ValueError("part4_workers must be non-negative")
+        if not 0 <= self.canny_low_threshold < self.canny_high_threshold:
+            raise ValueError("Canny thresholds must satisfy 0 <= low < high")
+        if self.canny_blur_kernel < 1 or self.canny_blur_kernel % 2 == 0:
+            raise ValueError("canny_blur_kernel must be a positive odd integer")
+        if self.canny_tolerance_radius < 0:
+            raise ValueError("canny_tolerance_radius must be non-negative")
 
 
 def to_base_config(config: Parts34Config) -> ExperimentConfig:

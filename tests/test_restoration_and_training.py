@@ -1,4 +1,5 @@
 import sys
+import json
 import tempfile
 import types
 import unittest
@@ -10,7 +11,8 @@ from PIL import Image
 
 import cityscapes_project.pipelines.parts34 as project
 from cityscapes_project.config import Parts34Config
-from cityscapes_project.methods.restoration import restore_image
+from cityscapes_project.methods.distortions import apply_aug, compute_snr
+from cityscapes_project.methods.restoration import restoration_parameters, restore_image
 from cityscapes_project.pipelines.parts34 import (
     PROJECT_CLASS_TO_ID,
     choose_training_condition,
@@ -40,6 +42,28 @@ class RestorationTests(unittest.TestCase):
     def test_unknown_restoration_is_rejected(self) -> None:
         with self.assertRaises(KeyError):
             restore_image(self.image, "Unknown", 1.0)
+
+    def test_restoration_strength_tracks_distortion_severity(self) -> None:
+        mild_noise = restoration_parameters("GaussNoise", 5.0)
+        severe_noise = restoration_parameters("GaussNoise", 50.0)
+        self.assertLess(mild_noise["h_luminance"], severe_noise["h_luminance"])
+        mild_darkness = restoration_parameters("LowLight", 0.8)
+        severe_darkness = restoration_parameters("LowLight", 0.1)
+        self.assertGreater(mild_darkness["gamma"], severe_darkness["gamma"])
+        self.assertLess(mild_darkness["blend"], severe_darkness["blend"])
+
+    def test_low_light_restoration_improves_snr_at_mild_and_severe_levels(self) -> None:
+        horizontal = np.linspace(20, 235, 128, dtype=np.uint8)
+        clean = np.repeat(horizontal[None, :, None], 64, axis=0)
+        clean = np.repeat(clean, 3, axis=2)
+        image = Image.fromarray(clean)
+        for level in (0.8, 0.1):
+            with self.subTest(level=level):
+                distorted = apply_aug(image, "LowLight", level)
+                restored = restore_image(distorted, "LowLight", level)
+                self.assertGreater(
+                    compute_snr(clean, restored), compute_snr(clean, distorted)
+                )
 
 
 class YoloDatasetTests(unittest.TestCase):
@@ -100,6 +124,36 @@ class YoloDatasetTests(unittest.TestCase):
             self.assertTrue(Path(str(captured["project"])).is_absolute())
             self.assertIn("train-", str(captured["name"]))
             self.assertIn("val-", str(captured["name"]))
+            self.assertEqual(captured["warmup_epochs"], 0.5)
+
+    def test_prepared_training_data_uses_png_and_records_class_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "cityscapes"
+            for split in ("train", "val"):
+                image_dir = root / "leftImg8bit" / split / "sample_city"
+                gt_dir = root / "gtFine" / split / "sample_city"
+                image_dir.mkdir(parents=True)
+                gt_dir.mkdir(parents=True)
+                sample_id = f"sample_city_{split}_000001"
+                image = np.full((16, 24, 3), 120, dtype=np.uint8)
+                labels = np.zeros((16, 24), dtype=np.uint8)
+                instances = np.zeros((16, 24), dtype=np.uint16)
+                instances[2:12, 4:20] = 26001
+                Image.fromarray(image).save(image_dir / f"{sample_id}_leftImg8bit.png")
+                Image.fromarray(labels).save(gt_dir / f"{sample_id}_gtFine_labelTrainIds.png")
+                Image.fromarray(instances).save(gt_dir / f"{sample_id}_gtFine_instanceIds.png")
+
+            config = Parts34Config(
+                dataset_root=root,
+                artifacts_dir=Path(directory) / "artifacts",
+                part4_clean_fraction=1.0,
+            )
+            _, prepared = project.prepare_yolo_dataset(config)
+            self.assertEqual(len(list((prepared / "images" / "train").glob("*.png"))), 1)
+            self.assertEqual(len(list((prepared / "images" / "train").glob("*.jpg"))), 0)
+            manifest = json.loads((prepared / "dataset_manifest.json").read_text())
+            self.assertEqual(manifest["recipe_version"], 2)
+            self.assertEqual(manifest["class_instance_counts"]["train"]["car"], 1)
 
 
 class Part3OrchestrationTests(unittest.TestCase):

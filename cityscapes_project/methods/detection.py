@@ -15,7 +15,10 @@ from ..utils.dependencies import cv2_module
 
 
 def _predict_kwargs(device: str | None, use_half: bool) -> dict[str, Any]:
-    return {"device": device, "quantize": 16 if use_half and device and device.startswith("cuda") else None}
+    return {
+        "device": device,
+        "quantize": 16 if use_half and device and device.startswith("cuda") else None,
+    }
 
 
 def yolo_overlay(
@@ -141,30 +144,54 @@ def evaluate_detections(
     predictions: Sequence[Detection],
     ground_truth: Sequence[Detection],
     classes: Sequence[str] = SHARED_DETECTION_CLASSES,
+    operating_confidence: float = 0.25,
 ) -> tuple[dict[str, float], list[dict[str, float | str]]]:
-    """Compute class AP@.50 and mAP@.50:.95 from instance-derived boxes."""
+    """Compute AP from all scores plus practical metrics at one confidence threshold."""
+
+    if not 0.0 <= operating_confidence <= 1.0:
+        raise ValueError("operating_confidence must be between 0 and 1")
 
     thresholds = np.arange(0.50, 0.96, 0.05)
     rows: list[dict[str, float | str]] = []
     for class_name in classes:
+        class_predictions = [item for item in predictions if item.class_name == class_name]
+        class_ground_truth = [item for item in ground_truth if item.class_name == class_name]
         evaluations = [
             _evaluate_detection_class(
-                [item for item in predictions if item.class_name == class_name],
-                [item for item in ground_truth if item.class_name == class_name],
+                class_predictions,
+                class_ground_truth,
                 float(threshold),
             )
             for threshold in thresholds
         ]
         aps = np.asarray([item["ap"] for item in evaluations])
         at_50 = evaluations[0]
+        operating = _evaluate_detection_class(
+            [item for item in class_predictions if item.score >= operating_confidence],
+            class_ground_truth,
+            0.50,
+        )
+        operating_precision = float(operating["precision"])
+        operating_recall = float(operating["recall"])
+        operating_f1 = (
+            2.0 * operating_precision * operating_recall
+            / (operating_precision + operating_recall)
+            if operating_precision + operating_recall
+            else 0.0
+        )
         rows.append({
             "class_name": class_name,
             "map_50_95": float(np.nanmean(aps)) if np.any(~np.isnan(aps)) else float("nan"),
             "ap_50": float(at_50["ap"]), "precision_50": float(at_50["precision"]),
             "recall_50": float(at_50["recall"]),
             "mean_matched_iou_50": float(at_50["mean_matched_iou"]),
+            "operating_confidence": float(operating_confidence),
+            "precision_50_at_operating_confidence": operating_precision,
+            "recall_50_at_operating_confidence": operating_recall,
+            "f1_50_at_operating_confidence": operating_f1,
             "gt_count": float(at_50["gt_count"]),
             "prediction_count": float(at_50["prediction_count"]),
+            "operating_prediction_count": float(operating["prediction_count"]),
         })
     valid = [row for row in rows if not math.isnan(float(row["map_50_95"]))]
     mean = lambda key: float(np.mean([float(row[key]) for row in valid])) if valid else 0.0
@@ -172,6 +199,17 @@ def evaluate_detections(
         "map_50_95": mean("map_50_95"), "map_50": mean("ap_50"),
         "mean_precision_50": mean("precision_50"), "mean_recall_50": mean("recall_50"),
         "mean_matched_iou_50": mean("mean_matched_iou_50"),
+        "operating_confidence": float(operating_confidence),
+        "mean_precision_50_at_operating_confidence": mean(
+            "precision_50_at_operating_confidence"
+        ),
+        "mean_recall_50_at_operating_confidence": mean(
+            "recall_50_at_operating_confidence"
+        ),
+        "mean_f1_50_at_operating_confidence": mean("f1_50_at_operating_confidence"),
         "ground_truth_objects": float(len(ground_truth)),
         "predicted_objects": float(len(predictions)), "evaluated_classes": float(len(valid)),
+        "operating_predicted_objects": float(
+            sum(1 for item in predictions if item.score >= operating_confidence)
+        ),
     }, rows

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import asdict, dataclass
 from typing import Any, Sequence
 
@@ -336,6 +337,16 @@ def run_part2(
                 "det_map_50": detection_summary["map_50"],
                 "det_precision_50": detection_summary["mean_precision_50"],
                 "det_recall_50": detection_summary["mean_recall_50"],
+                "det_operating_confidence": detection_summary["operating_confidence"],
+                "det_precision_50_at_operating_confidence": detection_summary[
+                    "mean_precision_50_at_operating_confidence"
+                ],
+                "det_recall_50_at_operating_confidence": detection_summary[
+                    "mean_recall_50_at_operating_confidence"
+                ],
+                "det_f1_50_at_operating_confidence": detection_summary[
+                    "mean_f1_50_at_operating_confidence"
+                ],
                 "det_mean_matched_iou_50": detection_summary["mean_matched_iou_50"],
             }
             summary_rows.append(summary_row)
@@ -348,12 +359,31 @@ def run_part2(
                 for row in detection_per_class
             )
 
+            # Persist every completed severity variant. A multi-hour run can be
+            # inspected or recovered even if a later model call is interrupted.
+            write_csv(output_dir / "distorted_per_image.csv", per_image_rows)
+            write_csv(output_dir / "distorted_summary.csv", summary_rows)
+            write_csv(output_dir / "segmentation_per_class.csv", segmentation_class_rows)
+            write_csv(output_dir / "detection_per_class.csv", detection_class_rows)
+            write_json(output_dir / "distorted_summary.json", {
+                "scope": "Part 2 - distorted images",
+                "complete": False,
+                "completed_variants": len(summary_rows),
+                "total_variants": total_variants,
+                "sample_count": len(references),
+                "distortion_levels": distortion_levels,
+                "variants": summary_rows,
+            })
+
     write_csv(output_dir / "distorted_per_image.csv", per_image_rows)
     write_csv(output_dir / "distorted_summary.csv", summary_rows)
     write_csv(output_dir / "segmentation_per_class.csv", segmentation_class_rows)
     write_csv(output_dir / "detection_per_class.csv", detection_class_rows)
     write_json(output_dir / "distorted_summary.json", {
         "scope": "Part 2 - distorted images",
+        "complete": True,
+        "completed_variants": len(summary_rows),
+        "total_variants": total_variants,
         "sample_count": len(references),
         "distortion_levels": distortion_levels,
         "variants": summary_rows,
@@ -366,6 +396,7 @@ def run_part2(
 def run_experiment(config: ExperimentConfig, part: str = "both") -> dict[str, Any]:
     """Run Part 1 and, when selected, Part 2 with shared loaded models."""
 
+    started = time.perf_counter()
     config.output_dir.mkdir(parents=True, exist_ok=True)
     samples = discover_cityscapes_samples(
         config.dataset_root, split=config.split, max_samples=config.max_samples, seed=config.seed
@@ -373,17 +404,24 @@ def run_experiment(config: ExperimentConfig, part: str = "both") -> dict[str, An
     LOGGER.info("Using %d Cityscapes %s samples", len(samples), config.split)
     detector, processor, segmenter, device = load_models(config)
     LOGGER.info("Inference device: %s", device)
+    elapsed_by_part: dict[str, float] = {}
+    part_started = time.perf_counter()
     references, part1_summary = run_part1(
         config, samples, detector, processor, segmenter, device
     )
+    elapsed_by_part["part1"] = time.perf_counter() - part_started
     result: dict[str, Any] = {"part1": part1_summary}
     if part in {"2", "both"}:
+        part_started = time.perf_counter()
         result["part2"] = run_part2(
             config, references, detector, processor, segmenter, device
         )
+        elapsed_by_part["part2"] = time.perf_counter() - part_started
     write_json(config.output_dir / "run_manifest.json", {
         "scope": "Course project Parts 1 and 2",
         "part_requested": part,
+        "elapsed_seconds": time.perf_counter() - started,
+        "elapsed_seconds_by_part": elapsed_by_part,
         "config": asdict(config),
         "result": result,
     })

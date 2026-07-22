@@ -1,0 +1,137 @@
+{
+  "complete": true,
+  "recipe_version": 3,
+  "dataset_root": "data\\cityscapes_official",
+  "seed": 7,
+  "split": {
+    "strategy": "city-disjoint-subset-of-official-train",
+    "target_fraction": 0.125,
+    "actual_fraction": 0.1253781512605042,
+    "train_cities": [
+      "aachen",
+      "bochum",
+      "bremen",
+      "cologne",
+      "dusseldorf",
+      "erfurt",
+      "hamburg",
+      "hanover",
+      "jena",
+      "strasbourg",
+      "stuttgart",
+      "tubingen",
+      "weimar",
+      "zurich"
+    ],
+    "internal_val_cities": [
+      "darmstadt",
+      "krefeld",
+      "monchengladbach",
+      "ulm"
+    ]
+  },
+  "official_val_reserved_for_final_evaluation": true,
+  "official_val_images": 500,
+  "source_counts": {
+    "train": 2602,
+    "val": 373
+  },
+  "view_counts_per_source": {
+    "train": 4,
+    "val": 2
+  },
+  "prepared_image_counts": {
+    "train": 10408,
+    "val": 746
+  },
+  "clean_anchor_policy": "view zero is an exact original PNG for every source image",
+  "corruption_policy": "remaining views cycle evenly over all distortion/severity pairs",
+  "distortion_levels": {
+    "GaussNoise": [
+      5.0,
+      10.0,
+      20.0,
+      35.0,
+      50.0
+    ],
+    "SevereJPEG": [
+      80.0,
+      60.0,
+      40.0,
+      20.0,
+      5.0
+    ],
+    "LowLight": [
+      0.8,
+      0.6,
+      0.4,
+      0.25,
+      0.1
+    ],
+    "MotionBlur": [
+      3.0,
+      5.0,
+      9.0,
+      15.0,
+      25.0
+    ]
+  },
+  "samples": 11154,
+  "condition_counts": {
+    "train": {
+      "Clean": 2602,
+      "GaussNoise": 1955,
+      "LowLight": 1951,
+      "MotionBlur": 1950,
+      "SevereJPEG": 1950
+    },
+    "val": {
+      "Clean": 373,
+      "GaussNoise": 95,
+      "LowLight": 95,
+      "MotionBlur": 93,
+      "SevereJPEG": 90
+    }
+  },
+  "source_class_instance_counts": {
+    "train": {
+      "person": 16784,
+      "bicycle": 3405,
+      "car": 23873,
+      "motorcycle": 640,
+      "bus": 337,
+      "train": 153,
+      "truck": 360
+    },
+    "val": {
+      "person": 1116,
+      "bicycle": 250,
+      "car": 3056,
+      "motorcycle": 95,
+      "bus": 42,
+      "train": 15,
+      "truck": 122
+    }
+  },
+  "class_instance_counts": {
+    "train": {
+      "person": 67136,
+      "bicycle": 13620,
+      "car": 95492,
+      "motorcycle": 2560,
+      "bus": 1348,
+      "train": 612,
+      "truck": 1440
+    },
+    "val": {
+      "person": 2232,
+      "bicycle": 500,
+      "car": 6112,
+      "motorcycle": 190,
+      "bus": 84,
+      "train": 30,
+      "truck": 244
+    }
+  },
+  "missing_train_classes": []
+}

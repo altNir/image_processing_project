@@ -16,7 +16,11 @@ from cityscapes_project.dataset import (
     raw_label_ids_to_train_ids,
 )
 from cityscapes_project.methods.classical import canny_detect, evaluate_canny_edges
-from cityscapes_project.methods.detection import bbox_iou, evaluate_detections
+from cityscapes_project.methods.detection import (
+    batched_model_detections,
+    bbox_iou,
+    evaluate_detections,
+)
 from cityscapes_project.methods.distortions import apply_aug, compute_snr
 from cityscapes_project.methods.segmentation import SegmentationAccumulator, compute_ious
 from cityscapes_project.pipelines.parts12 import pack_binary_map, unpack_binary_map
@@ -170,6 +174,46 @@ class CannyTests(unittest.TestCase):
 
 
 class DetectionTests(unittest.TestCase):
+    def test_batched_model_detections_preserves_image_alignment_and_mapping(self) -> None:
+        class FakeTensor:
+            def __init__(self, values: object) -> None:
+                self.values = np.asarray(values)
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return self
+
+            def numpy(self):
+                return self.values
+
+        class FakeBoxes:
+            def __init__(self, offset: float) -> None:
+                self.xyxy = FakeTensor([[offset, 1, offset + 4, 5]])
+                self.conf = FakeTensor([0.9])
+                self.cls = FakeTensor([2])
+
+            def __len__(self) -> int:
+                return 1
+
+        class FakeModel:
+            def predict(self, images, **kwargs):
+                self.kwargs = kwargs
+                return [type("Result", (), {"boxes": FakeBoxes(float(index))})() for index, _ in enumerate(images)]
+
+        model = FakeModel()
+        images = [Image.new("RGB", (8, 8)), Image.new("RGB", (8, 8))]
+        detections = batched_model_detections(
+            images, model, ["first", "second"], {2: "car"}, 0.001,
+            "cpu", False, batch=2, image_size=320,
+        )
+        self.assertEqual([item.image_id for item in detections], ["first", "second"])
+        self.assertEqual([item.class_name for item in detections], ["car", "car"])
+        self.assertEqual(detections[1].bbox, (1.0, 1.0, 5.0, 5.0))
+        self.assertEqual(model.kwargs["batch"], 2)
+        self.assertEqual(model.kwargs["imgsz"], 320)
+
     def test_matcher_uses_best_available_ground_truth(self) -> None:
         ground_truth = [
             Detection("image", "car", (0, 0, 10, 10)),

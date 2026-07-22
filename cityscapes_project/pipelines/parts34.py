@@ -10,9 +10,11 @@ import logging
 import math
 import platform
 import random
+import shutil
 import sys
 import time
 from collections import Counter
+from itertools import combinations
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -37,6 +39,7 @@ from cityscapes_project.methods.classical import (
 )
 from cityscapes_project.methods.detection import (
     DETECTION_EVALUATOR_VERSION,
+    batched_model_detections,
     evaluate_detections,
     model_detections,
     yolo_detections,
@@ -598,19 +601,75 @@ def _training_dataset_key(config: Parts34Config) -> str:
     train = config.part4_train_samples or "full"
     val = config.part4_val_samples or "full"
     recipe = json.dumps({
-        "recipe_version": 2,
+        "recipe_version": 3,
         "train": train,
         "val": val,
         "seed": config.seed,
         "clean_fraction": config.part4_clean_fraction,
+        "train_views": config.part4_train_views,
+        "val_views": config.part4_val_views,
+        "internal_val_fraction": config.part4_internal_val_fraction,
         "distortion_levels": config.distortion_levels,
     }, sort_keys=True)
     recipe_hash = hashlib.sha256(recipe.encode("utf-8")).hexdigest()[:10]
     return f"cityscapes_robust_train-{train}_val-{val}_seed-{config.seed}_{recipe_hash}"
 
 
+def city_disjoint_training_split(
+    samples: Sequence[Any], fraction: float, seed: int
+) -> tuple[list[Any], list[Any], dict[str, Any]]:
+    """Partition the official train split by city for leakage-free model selection."""
+
+    by_city: dict[str, list[Any]] = {}
+    for sample in samples:
+        by_city.setdefault(sample.image_path.parent.name, []).append(sample)
+    cities = sorted(by_city)
+    if len(cities) < 2:
+        return list(samples), [], {
+            "strategy": "official-val-fallback-for-degenerate-smoke-data",
+            "train_cities": cities,
+            "internal_val_cities": [],
+        }
+    target = round(len(samples) * fraction)
+    minimum_cities = min(4, max(1, len(cities) // 3))
+    maximum_cities = min(len(cities) - 1, max(minimum_cities, 6))
+    candidates: list[tuple[int, str, tuple[str, ...]]] = []
+    for count in range(minimum_cities, maximum_cities + 1):
+        for selected in combinations(cities, count):
+            selected_count = sum(len(by_city[city]) for city in selected)
+            tie = hashlib.sha256(f"{seed}|{'|'.join(selected)}".encode()).hexdigest()
+            candidates.append((abs(selected_count - target), tie, selected))
+    _, _, val_cities_tuple = min(candidates)
+    val_cities = set(val_cities_tuple)
+    train_samples = [sample for sample in samples if sample.image_path.parent.name not in val_cities]
+    val_samples = [sample for sample in samples if sample.image_path.parent.name in val_cities]
+    return train_samples, val_samples, {
+        "strategy": "city-disjoint-subset-of-official-train",
+        "target_fraction": fraction,
+        "actual_fraction": len(val_samples) / len(samples),
+        "train_cities": sorted(set(cities) - val_cities),
+        "internal_val_cities": sorted(val_cities),
+    }
+
+
+def _limit_samples(samples: Sequence[Any], limit: int, seed: int) -> list[Any]:
+    if limit <= 0 or limit >= len(samples):
+        return sorted(samples, key=lambda sample: sample.sample_id)
+    return sorted(random.Random(seed).sample(list(samples), limit), key=lambda sample: sample.sample_id)
+
+
+def _corruption_conditions(
+    levels_by_name: Mapping[str, Sequence[float]],
+) -> list[tuple[str, float, int]]:
+    return [
+        (name, float(level), index)
+        for name in sorted(levels_by_name)
+        for index, level in enumerate(levels_by_name[name])
+    ]
+
+
 def prepare_yolo_dataset(config: Parts34Config) -> tuple[Path, Path]:
-    """Create a mixed clean/distorted YOLO dataset from Cityscapes instances."""
+    """Create balanced lossless views with a city-disjoint internal validation set."""
 
     root = config.artifacts_dir / "part4" / _training_dataset_key(config)
     manifest_path = root / "dataset_manifest.json"
@@ -623,18 +682,31 @@ def prepare_yolo_dataset(config: Parts34Config) -> tuple[Path, Path]:
 
     levels_by_name = config.distortion_levels or DEFAULT_DISTORTION_LEVELS
     rows: list[dict[str, Any]] = []
-    class_counts: dict[str, Counter[str]] = {
+    source_class_counts: dict[str, Counter[str]] = {
         "train": Counter(),
         "val": Counter(),
     }
+    prepared_class_counts: dict[str, Counter[str]] = {"train": Counter(), "val": Counter()}
     condition_counts: dict[str, Counter[str]] = {
         "train": Counter(),
         "val": Counter(),
     }
-    for split, limit in (("train", config.part4_train_samples), ("val", config.part4_val_samples)):
-        samples = discover_cityscapes_samples(
-            config.dataset_root, split=split, max_samples=limit, seed=config.seed
+    official_train = discover_cityscapes_samples(config.dataset_root, split="train")
+    train_sources, val_sources, split_details = city_disjoint_training_split(
+        official_train, config.part4_internal_val_fraction, config.seed
+    )
+    if not val_sources:
+        # Keeps tiny synthetic/smoke datasets usable. Final experiments always
+        # take the city-disjoint branch and never inspect official val here.
+        val_sources = discover_cityscapes_samples(
+            config.dataset_root, split="val", max_samples=config.part4_val_samples, seed=config.seed
         )
+    train_sources = _limit_samples(train_sources, config.part4_train_samples, config.seed)
+    val_sources = _limit_samples(val_sources, config.part4_val_samples, config.seed + 1)
+    split_sources = {"train": train_sources, "val": val_sources}
+    corruptions = _corruption_conditions(levels_by_name)
+    for split, samples in split_sources.items():
+        views = config.part4_train_views if split == "train" else config.part4_val_views
         image_dir = root / "images" / split
         label_dir = root / "labels" / split
         image_dir.mkdir(parents=True, exist_ok=True)
@@ -643,44 +715,45 @@ def prepare_yolo_dataset(config: Parts34Config) -> tuple[Path, Path]:
             if index % 100 == 0:
                 LOGGER.info("Preparing Part 4 %s data [%d/%d]", split, index, len(samples))
             image, _, instance = load_sample(sample)
-            condition, level, level_index = choose_training_condition(
-                index, sample.sample_id,
-                config.seed + (0 if split == "train" else 100_000),
-                levels_by_name, config.part4_clean_fraction,
-            )
-            if condition == "Clean":
-                output_rgb = np.asarray(image)
-                snr = float("inf")
-            else:
-                distortion_seed = stable_distortion_seed(
-                    config.seed, sample.sample_id, condition, level_index
-                )
-                output_rgb = apply_aug(image, condition, float(level), seed=distortion_seed)
-                snr = compute_snr(np.asarray(image), output_rgb)
-            # PNG avoids silently adding JPEG artifacts to clean and non-JPEG
-            # training conditions. The prepared dataset is cached between runs.
-            output_image = image_dir / f"{sample.sample_id}.png"
-            Image.fromarray(output_rgb).save(output_image, compress_level=3)
             boxes = instance_mask_to_boxes(instance, sample.sample_id)
-            condition_counts[split][condition] += 1
-            class_counts[split].update(item.class_name for item in boxes)
+            source_class_counts[split].update(item.class_name for item in boxes)
             label_text = "\n".join(
                 detection_to_yolo_row(item, image.width, image.height) for item in boxes
             )
-            (label_dir / f"{sample.sample_id}.txt").write_text(
-                label_text + ("\n" if label_text else ""), encoding="utf-8"
-            )
-            rows.append({
-                "split": split,
-                "sample_id": sample.sample_id,
-                "condition": condition,
-                "level": level,
-                "snr_db": snr,
-                "objects": len(boxes),
-            })
+            for view_index in range(views):
+                if view_index == 0:
+                    condition, level, level_index = "Clean", None, 0
+                else:
+                    condition, level, level_index = corruptions[
+                        (index * max(1, views - 1) + view_index - 1) % len(corruptions)
+                    ]
+                suffix = "clean" if condition == "Clean" else f"{condition.lower()}_{level_index}"
+                view_id = f"{sample.sample_id}__v{view_index:02d}_{suffix}"
+                output_image = image_dir / f"{view_id}.png"
+                if condition == "Clean":
+                    shutil.copy2(sample.image_path, output_image)
+                    snr = float("inf")
+                else:
+                    distortion_seed = stable_distortion_seed(
+                        config.seed, sample.sample_id, condition, level_index
+                    )
+                    output_rgb = apply_aug(image, condition, float(level), seed=distortion_seed)
+                    snr = compute_snr(np.asarray(image), output_rgb)
+                    Image.fromarray(output_rgb).save(output_image, compress_level=3)
+                (label_dir / f"{view_id}.txt").write_text(
+                    label_text + ("\n" if label_text else ""), encoding="utf-8"
+                )
+                condition_counts[split][condition] += 1
+                prepared_class_counts[split].update(item.class_name for item in boxes)
+                rows.append({
+                    "split": split, "city": sample.image_path.parent.name,
+                    "sample_id": sample.sample_id, "view_index": view_index,
+                    "condition": condition, "level": level, "snr_db": snr,
+                    "objects": len(boxes),
+                })
 
     missing_train_classes = [
-        name for name in SHARED_DETECTION_CLASSES if class_counts["train"][name] == 0
+        name for name in SHARED_DETECTION_CLASSES if source_class_counts["train"][name] == 0
     ]
     if missing_train_classes:
         LOGGER.warning(
@@ -700,25 +773,40 @@ def prepare_yolo_dataset(config: Parts34Config) -> tuple[Path, Path]:
     write_csv(root / "samples.csv", rows)
     write_json(manifest_path, {
         "complete": True,
-        "recipe_version": 2,
+        "recipe_version": 3,
         "dataset_root": config.dataset_root,
         "seed": config.seed,
-        "clean_fraction": config.part4_clean_fraction,
+        "split": split_details,
+        "official_val_reserved_for_final_evaluation": True,
+        "official_val_images": len(discover_cityscapes_samples(config.dataset_root, split="val")),
+        "source_counts": {key: len(value) for key, value in split_sources.items()},
+        "view_counts_per_source": {
+            "train": config.part4_train_views, "val": config.part4_val_views,
+        },
+        "prepared_image_counts": dict(Counter(row["split"] for row in rows)),
+        "clean_anchor_policy": "view zero is an exact original PNG for every source image",
+        "corruption_policy": "remaining views cycle evenly over all distortion/severity pairs",
         "distortion_levels": levels_by_name,
         "samples": len(rows),
         "condition_counts": {
             split: dict(sorted(counts.items())) for split, counts in condition_counts.items()
         },
+        "source_class_instance_counts": {
+            split: {name: int(counts[name]) for name in SHARED_DETECTION_CLASSES}
+            for split, counts in source_class_counts.items()
+        },
         "class_instance_counts": {
             split: {name: int(counts[name]) for name in SHARED_DETECTION_CLASSES}
-            for split, counts in class_counts.items()
+            for split, counts in prepared_class_counts.items()
         },
         "missing_train_classes": missing_train_classes,
     })
     return yaml_path, root
 
 
-def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
+def train_yolo(
+    config: Parts34Config, yaml_path: Path, device: str, *, run_name: str | None = None
+) -> Path:
     """Fine-tune YOLO using the prepared robust Cityscapes dataset."""
 
     from ultralytics import YOLO
@@ -731,7 +819,7 @@ def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
     elif device.startswith("cuda:"):
         train_device = int(device.split(":", 1)[1])
     run_root = (config.artifacts_dir / "part4" / "training_runs").resolve()
-    run_name = _training_dataset_key(config)
+    run_name = run_name or _training_dataset_key(config)
     model.train(
         data=str(yaml_path), epochs=config.part4_epochs, imgsz=config.part4_image_size,
         batch=config.part4_batch, workers=config.part4_workers, device=train_device,
@@ -740,6 +828,8 @@ def train_yolo(config: Parts34Config, yaml_path: Path, device: str) -> Path:
         seed=config.seed, deterministic=True, plots=True, verbose=True,
         warmup_epochs=min(3.0, max(0.5, 0.10 * config.part4_epochs)),
         close_mosaic=min(5, max(1, config.part4_epochs // 5)),
+        patience=config.part4_patience, optimizer="AdamW", lr0=0.001,
+        lrf=0.01, cos_lr=True, weight_decay=0.0005,
     )
     trainer = getattr(model, "trainer", None)
     trainer_best = getattr(trainer, "best", None)
@@ -764,15 +854,19 @@ def evaluate_fine_tuned_yolo(
         conditions.extend((name, index, float(level)) for index, level in enumerate(levels))
     summaries: list[dict[str, Any]] = []
     class_rows: list[dict[str, Any]] = []
+    ground_truth: list[Detection] = []
+    for sample in samples:
+        clean, _, instance = load_sample(sample)
+        clean.close()
+        ground_truth.extend(instance_mask_to_boxes(instance, sample.sample_id))
+    image_ids = [sample.sample_id for sample in samples]
 
     for condition, level_index, level in conditions:
         LOGGER.info("Part 4 evaluation: %s level=%s", condition, level)
-        pretrained_predictions: list[Detection] = []
-        finetuned_predictions: list[Detection] = []
-        ground_truth: list[Detection] = []
+        evaluation_images: list[Image.Image] = []
         snrs: list[float] = []
         for sample in samples:
-            clean, _, instance = load_sample(sample)
+            clean = Image.open(sample.image_path).convert("RGB")
             if condition == "Clean":
                 evaluation_image = clean
             else:
@@ -782,15 +876,18 @@ def evaluate_fine_tuned_yolo(
                 distorted = apply_aug(clean, condition, float(level), seed=seed)
                 snrs.append(compute_snr(np.asarray(clean), distorted))
                 evaluation_image = Image.fromarray(distorted)
-            ground_truth.extend(instance_mask_to_boxes(instance, sample.sample_id))
-            pretrained_predictions.extend(model_detections(
-                evaluation_image, pretrained, sample.sample_id, COCO_ID_TO_SHARED_CLASS,
-                config.yolo_eval_confidence, device, config.use_half,
-            ))
-            finetuned_predictions.extend(model_detections(
-                evaluation_image, fine_tuned, sample.sample_id, PROJECT_ID_TO_CLASS,
-                config.yolo_eval_confidence, device, config.use_half,
-            ))
+            evaluation_images.append(evaluation_image)
+
+        pretrained_predictions = batched_model_detections(
+            evaluation_images, pretrained, image_ids, COCO_ID_TO_SHARED_CLASS,
+            config.yolo_eval_confidence, device, config.use_half,
+            batch=config.part4_eval_batch, image_size=config.part4_image_size,
+        )
+        finetuned_predictions = batched_model_detections(
+            evaluation_images, fine_tuned, image_ids, PROJECT_ID_TO_CLASS,
+            config.yolo_eval_confidence, device, config.use_half,
+            batch=config.part4_eval_batch, image_size=config.part4_image_size,
+        )
 
         pretrained_summary, pretrained_classes = evaluate_detections(
             pretrained_predictions, ground_truth

@@ -6,6 +6,7 @@ __pycache__/
 outputs/
 outputs_parts_3_4/
 artifacts/
+artifacts_final/
 Ultralytics/
 data/
 datasets/
@@ -13,3 +14,4 @@ datasets/
 *.pth
 *.bin
 tmp/
+part4_final_*.log

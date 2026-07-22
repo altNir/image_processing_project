@@ -1,0 +1,11 @@
+path: artifacts_final/part4/cityscapes_robust_train-full_val-full_seed-7_c7a439ac62
+train: images/train
+val: images/val
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: motorcycle
+  4: bus
+  5: train
+  6: truck

@@ -1,10 +1,10 @@
 # Cityscapes Image Processing and Vision Robustness
 
-This course project studies how classical and deep-learning vision methods behave when urban street images are degraded. It measures clean-image performance, applies controlled distortions, tests restoration methods, and prepares a distortion-aware YOLO fine-tuning experiment.
+This course project studies how classical and deep-learning vision methods behave when urban street images are degraded. It measures clean-image performance, applies controlled distortions, tests restoration methods, and trains a distortion-aware YOLO detector.
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
-> **Current result status:** the repository includes 125-image results for all four parts. Part 3 is the final recipe-v3 experiment on official Cityscapes data. Part 4 includes a 20-epoch checkpoint trained on 1,000 images and validated on 125; both remain intermediate relative to the full 500-image evaluation and 2,975-image training split.
+> **Current result status:** Parts 1-3 include matched 125-image official-Cityscapes results. Part 3 uses the final recipe-v3 restoration implementation. Part 4 is final recipe v3: three independently seeded robust detectors, city-disjoint model selection, and evaluator-v2 results on all 500 untouched validation images.
 
 ## Project overview
 
@@ -56,9 +56,9 @@ Part 3 is a paired experiment: the distorted and restored measurements use the s
 
 The detection evaluator is versioned. Version 2 matches each prediction to the highest-IoU *available* ground-truth box, fixing the crowded-object case in which the global best box was already claimed. When Part 2 results are reused, Part 3 reuses only validated ORB, Canny, and SegFormer baselines and recomputes distorted YOLO predictions so both detection conditions use evaluator version 2.
 
-## Results: 125-image validation run
+## Results
 
-Parts 1, 2, and 4 use the peer's seed-`7` run under [`outputs_big_125/`](outputs_big_125/); Part 4 trained on 1,000 images for 20 epochs. Part 3 uses the same 125 evaluation IDs in a separate official-data run with the corrected evaluator and expanded statistical outputs.
+Parts 1-2 use the peer's seed-`7` 125-image run under [`outputs_big_125/`](outputs_big_125/). Part 3 uses the same 125 evaluation IDs in a separate official-data run with evaluator v2 and expanded statistical outputs. Part 4 uses the final three-seed recipe-v3 run on all 500 official validation images.
 
 ### Part 1: clean baselines
 
@@ -109,30 +109,45 @@ SSIM improved in all 20 variants, PSNR and MAE improved in 19, and detection mAP
 
 ### Part 4: distortion-aware fine-tuning
 
-The 1,000-image, 20-epoch fine-tuning run preserved clean performance and improved robustness under most distortions:
+The final protocol eliminates the earlier run's validation leakage and unintended JPEG contamination. Four Cityscapes training cities (Darmstadt, Krefeld, Monchengladbach, and Ulm; 373 sources) form the internal validation set; the other 14 cities provide 2,602 training sources. Every training source contributes its exact clean PNG plus three deterministic corrupted views, evenly covering all 20 distortion/severity pairs (10,408 training images total). Internal validation uses a clean and corrupted view per source (746 images). Official `val` remains untouched until final evaluation.
 
-| Comparison | Pretrained | Fine-tuned | Change |
+YOLOv8n was fine-tuned from the same COCO checkpoint with AdamW, cosine learning-rate decay, mixed precision, a 40-epoch ceiling, and patience 10. Seeds 7, 17, and 29 selected epochs 24, 30, and 34 with city-disjoint internal mAP values 0.260, 0.268, and 0.249. No seed was selected or discarded using final data.
+
+All models were evaluated with detector evaluator v2 on the same 500 official validation images and deterministic distortions. Values below are the mean across the three robust seeds; `±` is the sample standard deviation across seeds.
+
+| Comparison | COCO pretrained | Robust mean ± seed SD | Absolute change |
 |---|---:|---:|---:|
-| Clean mAP@0.50:0.95 | 0.1762 | 0.1766 | +0.0004 |
-| Mean distorted mAP@0.50:0.95 | 0.1415 | 0.1567 | +0.0152 |
+| Clean mAP@0.50:0.95 | 0.1600 | 0.2581 ± 0.0091 | +0.0981 |
+| Mean over 20 corruptions | 0.1312 | 0.2346 ± 0.0060 | +0.1035 |
 
-The relative improvement in mean distorted mAP is approximately 10.8%, and 17 of 20 distorted conditions improved. The largest gains occurred for Gaussian noise sigma 50 (+0.0542), Gaussian noise sigma 35 (+0.0443), low light factor 0.10 (+0.0412), and motion blur kernel 25 (+0.0378). Small regressions remained for Gaussian noise sigma 5 and JPEG qualities 60 and 40, showing the expected trade-off between severe-distortion robustness and mild-condition performance.
+Mean corrupted mAP improved by 78.9% relative, and all 20 corrupted conditions improved. A deterministic 20,000-resample condition-paired bootstrap gives a 95% interval of `[+0.0987, +0.1089]` for mean mAP gain. The weakest condition gain was still +0.0881 (Gaussian noise sigma 10); the largest was +0.1309 (Gaussian noise sigma 50). All pre-registered gates passed: clean change at least -0.005, positive lower confidence bound, at least 16/20 nonnegative conditions, and no supported-class regression larger than 0.01.
 
-![Pretrained and fine-tuned YOLO robustness](outputs_big_125/part4/figures/fine_tuning_per_snr.png)
+| Class | Pretrained corrupted mean | Robust corrupted mean | Change |
+|---|---:|---:|---:|
+| Person | 0.1335 | 0.2085 | +0.0750 |
+| Bicycle | 0.0804 | 0.1487 | +0.0684 |
+| Car | 0.3014 | 0.4323 | +0.1309 |
+| Motorcycle | 0.0372 | 0.1097 | +0.0725 |
+| Bus | 0.2275 | 0.3816 | +0.1541 |
+| Train | 0.0294 | 0.1441 | +0.1147 |
+| Truck | 0.1089 | 0.2176 | +0.1087 |
+
+The final model improves every class on average; notably, bus and train no longer collapse as they did in the preliminary peer checkpoint. Severe corruption still reduces absolute performance, but robust degradation is much slower and seed variability remains small.
+
+![Three-seed robustness curves](outputs_part4_v3_official/part4/figures/robustness_curves_three_seeds.png)
+
+![Robustness gain heatmap](outputs_part4_v3_official/part4/figures/robustness_gain_heatmap.png)
+
+![Per-class robustness gain](outputs_part4_v3_official/part4/figures/per_class_robustness_gain.png)
+
+![Three-seed training convergence](outputs_part4_v3_official/part4/figures/training_convergence_three_seeds.png)
 
 ## Dataset
 
-The project needs the full-resolution Cityscapes images and fine annotations, including
-the instance-ID masks used to derive object-detection ground truth. Two acquisition
-routes are known:
-
-- Official: download `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip`
-  after accepting the terms on the [Cityscapes website](https://www.cityscapes-dataset.com/).
-- Optional public mirror: download the full
-  [`kavithak1388/cityscapes` archive from Kaggle](https://www.kaggle.com/datasets/kavithak1388/cityscapes).
-  This mirror extracts to a directory named `Cityscape`; rename it to `cityscapes`.
-  The mirror does not declare a Kaggle license, so the original Cityscapes
-  non-commercial terms still need to be respected.
+The project uses the official full-resolution Cityscapes images and fine annotations,
+including the instance-ID masks used to derive object-detection ground truth. Download
+`leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` after accepting the terms
+on the [Cityscapes website](https://www.cityscapes-dataset.com/).
 
 Whichever route is used, place the extracted files under one dataset root:
 
@@ -207,7 +222,7 @@ Part 2 automatically computes the clean Part 1 references it needs.
 
 ### Run the complete experiment
 
-Omitting `--max-samples` uses all 500 validation images. Part 4 defaults to all 2,975 Cityscapes training images, all 500 validation images, and 20 epochs.
+Omitting `--max-samples` uses all 500 validation images. Part 4 defaults to a city-disjoint 12.5% internal holdout from official `train`, four prepared training views per remaining source, and a 40-epoch ceiling with patience 10.
 
 ```powershell
 python .\main.py `
@@ -230,6 +245,20 @@ python .\main.py `
   --device cuda `
   --fine-tuned-weights .\artifacts\part4\training_runs\<run-name>\weights\best.pt
 ```
+
+### Reproduce the final Part 4 protocol
+
+```powershell
+python .\scripts\run_part4_final.py `
+  --dataset-root .\data\cityscapes `
+  --output-dir .\outputs_part4_v3_official `
+  --artifacts-dir .\artifacts_final `
+  --epochs 40 --batch 32 --workers 8 --eval-batch 32
+```
+
+This entry point trains seeds 7, 17, and 29 on one common prepared dataset, evaluates
+every checkpoint and the COCO baseline on all 500 untouched validation images, and
+writes recoverable progress after each of the 21 clean/corrupted conditions.
 
 ## Main configuration options
 
@@ -255,11 +284,15 @@ python .\main.py `
 | `--part3-bootstrap-resamples` | `1000` | Deterministic paired bootstrap samples per Part 3 metric and severity |
 | `--part3-confidence-level` | `0.95` | Confidence level for paired Part 3 intervals |
 | `--part4-train-samples` | `0` | Part 4 training limit; `0` means all 2,975 training images |
-| `--part4-val-samples` | `0` | Part 4 validation limit; `0` means all 500 validation images |
-| `--part4-epochs` | `20` | YOLO fine-tuning epochs |
+| `--part4-val-samples` | `0` | Internal city-disjoint validation limit; `0` means the complete held-out subset of `train` |
+| `--part4-epochs` | `40` | Maximum YOLO fine-tuning epochs; patience-based early stopping is enabled |
 | `--part4-image-size` | `640` | YOLO training resolution |
 | `--part4-batch` | `8` | Training batch size; reduce it after a CUDA out-of-memory error |
-| `--part4-clean-fraction` | `0.20` | Fraction of clean images in the robust training mixture |
+| `--part4-train-views` | `4` | Views per training source: one exact clean anchor plus balanced corruptions |
+| `--part4-val-views` | `2` | Views per internal-validation source |
+| `--part4-internal-val-fraction` | `0.125` | Target fraction of official `train` held out by whole city |
+| `--part4-patience` | `10` | Early-stopping patience in epochs |
+| `--part4-eval-batch` | `32` | Batched final-inference size |
 | `--rebuild-training-data` | off | Recreate the cached Part 4 training dataset |
 | `--no-reuse-part2` | off | Recompute distorted Part 3 baselines instead of reusing a complete matching Part 2 run |
 
@@ -292,14 +325,21 @@ outputs/
 |   |-- restoration_manifest.json
 |   `-- figures/
 `-- part4/
-    |-- fine_tuning_summary.json
     |-- fine_tuning_summary.csv
+    |-- model_condition_metrics.csv
     |-- detection_per_class.csv
+    |-- seed_summary.csv
+    |-- per_class_robustness_summary.csv
+    |-- final_analysis.json
+    |-- experiment_manifest.json
     |-- run_summary.json
+    |-- checkpoints/
+    |-- training/
+    |-- training_dataset/
     `-- figures/
 ```
 
-Useful tracked examples from the 125-image run:
+Useful tracked results:
 
 - [Part 1 clean summary](outputs_big_125/part1/clean_summary.json)
 - [Part 2 aggregate results](outputs_big_125/part2/distorted_summary.csv)
@@ -308,11 +348,13 @@ Useful tracked examples from the 125-image run:
 - [Part 3 per-image results](outputs_big_125/part3/restoration_per_image.csv)
 - [Part 3 paired statistics](outputs_big_125/part3/paired_statistics.csv)
 - [Part 3 reproducibility manifest](outputs_big_125/part3/restoration_manifest.json)
-- [Part 4 fine-tuning results](outputs_big_125/part4/fine_tuning_summary.csv)
+- [Part 4 final analysis](outputs_part4_v3_official/part4/final_analysis.json)
+- [Part 4 condition results](outputs_part4_v3_official/part4/fine_tuning_summary.csv)
+- [Part 4 reproducibility manifest](outputs_part4_v3_official/part4/experiment_manifest.json)
 - [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
 - [Part 3 recipe-v3 run configuration](outputs_part3_v3_125_official/run_manifest_parts_3_4.json)
 
-`outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v3_125_official/` contains the final Part 3 code-compatible results. `incomplete_old_run/` is retained only for provenance and must not be combined with current results.
+`outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v3_125_official/` contains the final Part 3 results, and `outputs_part4_v3_official/` contains the final Part 4 outputs and checkpoints. `incomplete_old_run/` is retained only for provenance and must not be combined with current results.
 
 ## Reproducibility and evaluation design
 
@@ -325,10 +367,11 @@ Useful tracked examples from the 125-image run:
 - Detection uses a low confidence floor and 101-point AP interpolation at IoU thresholds 0.50 through 0.95.
 - Detection also reports precision, recall, and F1 at confidence `0.25`; the terminal precision from the `0.001` AP floor is retained only for audit compatibility.
 - Part 4 uses Cityscapes ground-truth instance masks, not model-generated pseudo-labels.
-- Part 4 training and validation images come from separate Cityscapes splits.
-- Prepared Part 4 images use PNG so clean and non-JPEG conditions do not acquire unintended JPEG artifacts.
-- The Part 4 dataset manifest records class-instance and distortion-condition counts before training.
-- Manifests store the configuration and prepared-dataset identity for later auditing.
+- Part 4 reserves all official `val` images for one final evaluation. Model selection uses a city-disjoint internal subset drawn only from official `train`.
+- Every Part 4 training source has an exact clean PNG anchor; three additional lossless views cycle evenly over all 20 distortion/severity pairs.
+- Seeds 7, 17, and 29 use the same split and recipe. Results are reported as a mean and seed standard deviation without selecting the best seed on final data.
+- Baseline and robust models see the same 500 images and deterministic corruptions. Detection evaluator v2 is used throughout.
+- The Part 4 manifest records cities, source/view counts, class instances, condition balance, software versions, prepared-data identity, and checkpoint SHA-256 hashes.
 
 SNR is computed as:
 
@@ -355,7 +398,8 @@ images_project/
 |   |   `-- detection.py            # YOLO conversion and AP metrics
 |   |-- pipelines/
 |   |   |-- parts12.py              # Parts 1 and 2 orchestration
-|   |   `-- parts34.py              # Parts 3 and 4 orchestration
+|   |   |-- parts34.py              # Parts 3 and 4 orchestration
+|   |   `-- part4_final.py           # Multi-seed final protocol and analysis
 |   `-- utils/
 |       |-- dependencies.py         # Optional dependency messages
 |       |-- device.py               # CUDA/CPU selection and model loading
@@ -367,6 +411,7 @@ images_project/
 |   |-- test_core_methods.py
 |   |-- test_restoration_and_training.py
 |   `-- test_timing.py
+|-- scripts/run_part4_final.py      # Reproducible final Part 4 entry point
 |-- requirements.txt
 `-- setup_cuda.ps1
 ```
@@ -383,13 +428,13 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, se
 
 ## Runtime estimate
 
-The replacement 125-image Part 3 run took 67 minutes on an RTX 5090 system. The peer's earlier complete 125-image run took 1 hour 57 minutes on an RTX 4060, including approximately 19 minutes for Parts 1-2 and 24 minutes for Part 4. Part 4 training itself took about 3 minutes 23 seconds; multi-condition evaluation dominated its runtime. A 500-image Part 3 run is estimated at roughly 4.5 hours on the RTX 5090 system.
+The replacement 125-image Part 3 run took 67 minutes on an RTX 5090 system. Final Part 4 took 2 hours 37 minutes on the same system: 27 minutes to prepare 11,154 lossless views, about 88 minutes across three training seeds, 42 minutes for the complete four-model/21-condition evaluation, and under one minute for statistics and figures. A 500-image Part 3 run is estimated at roughly 4.5 hours on this system.
 
 ## Assumptions and known limitations
 
-- The tracked 125-image results are substantially more reliable than the smoke runs but still cover only one quarter of the 500-image validation split.
-- Part 4 used 1,000 of the 2,975 available training images; the complete training split may change the robustness trade-off.
-- Parts 1, 2, and 4 were produced before detection evaluator version 2 and should be audited for strict cross-part consistency.
+- The tracked Parts 1-3 results cover 125 of 500 validation images; final Part 4 uses all 500.
+- Parts 1-2 were produced before detection evaluator v2 and should be audited for strict cross-part detection consistency.
+- Part 4's confidence interval resamples the 20 declared corruption conditions; it quantifies consistency across this benchmark suite, not uncertainty over every possible real-world corruption.
 - Severity-aware restoration can still remove features useful to downstream models; Part 3 therefore reports positive and negative gains.
 - The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
 - Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.

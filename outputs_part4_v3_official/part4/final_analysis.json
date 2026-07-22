@@ -1,0 +1,122 @@
+{
+  "protocol": "Part 4 final recipe v3",
+  "detection_evaluator_version": 2,
+  "official_final_sample_count": 500,
+  "training_seeds": [
+    7,
+    17,
+    29
+  ],
+  "clean": {
+    "distortion": "Clean",
+    "severity_index": "0",
+    "level": "",
+    "sample_count": "500",
+    "mean_snr_db": "",
+    "pretrained_map_50_95": "0.1599692759531892",
+    "robust_mean_map_50_95": "0.25807085557513104",
+    "robust_std_map_50_95": "0.009126226226452238",
+    "mean_gain": "0.09810157962194185",
+    "condition_elapsed_seconds": "73.04504760000054"
+  },
+  "mean_corrupted_pretrained_map_50_95": 0.13118658281273626,
+  "mean_corrupted_robust_map_50_95": 0.23464031318713707,
+  "mean_corrupted_gain": 0.1034537303744008,
+  "nonnegative_corrupted_conditions": 20,
+  "condition_paired_bootstrap": {
+    "pair_count": 20,
+    "higher_is_better": true,
+    "mean_improvement": 0.1034537303744008,
+    "median_improvement": 0.09987918336444274,
+    "ci_low": 0.09867491712811646,
+    "ci_high": 0.10890461454126195,
+    "win_rate": 1.0,
+    "tie_rate": 0.0
+  },
+  "acceptance_criteria": {
+    "clean_map_loss_no_worse_than_0.005": true,
+    "corrupted_gain_95ci_strictly_positive": true,
+    "at_least_16_of_20_corruptions_nonnegative": true,
+    "no_supported_class_mean_corrupted_regression_below_0.01": true
+  },
+  "all_acceptance_criteria_pass": true,
+  "per_seed": [
+    {
+      "model": "robust_seed_7",
+      "clean_map_50_95": 0.25454621023787366,
+      "clean_gain": 0.09457693428468447,
+      "mean_corrupted_map_50_95": 0.22906091398080167,
+      "mean_corrupted_gain": 0.09787433116806539,
+      "nonnegative_conditions": 20
+    },
+    {
+      "model": "robust_seed_17",
+      "clean_map_50_95": 0.268433798080219,
+      "clean_gain": 0.10846452212702981,
+      "mean_corrupted_map_50_95": 0.24092637269893777,
+      "mean_corrupted_gain": 0.10973978988620152,
+      "nonnegative_conditions": 20
+    },
+    {
+      "model": "robust_seed_29",
+      "clean_map_50_95": 0.2512325584073004,
+      "clean_gain": 0.09126328245411122,
+      "mean_corrupted_map_50_95": 0.2339336528816717,
+      "mean_corrupted_gain": 0.10274707006893542,
+      "nonnegative_conditions": 20
+    }
+  ],
+  "per_class": [
+    {
+      "class_name": "person",
+      "official_val_gt_instances": 3395,
+      "pretrained_mean_corrupted_map_50_95": 0.1335190398259645,
+      "robust_mean_corrupted_map_50_95": 0.20854978084441894,
+      "mean_corrupted_gain": 0.0750307410184545
+    },
+    {
+      "class_name": "bicycle",
+      "official_val_gt_instances": 1165,
+      "pretrained_mean_corrupted_map_50_95": 0.08037398747689854,
+      "robust_mean_corrupted_map_50_95": 0.14873296966361577,
+      "mean_corrupted_gain": 0.06835898218671722
+    },
+    {
+      "class_name": "car",
+      "official_val_gt_instances": 4653,
+      "pretrained_mean_corrupted_map_50_95": 0.3014327186272857,
+      "robust_mean_corrupted_map_50_95": 0.4322927540837907,
+      "mean_corrupted_gain": 0.13086003545650488
+    },
+    {
+      "class_name": "motorcycle",
+      "official_val_gt_instances": 149,
+      "pretrained_mean_corrupted_map_50_95": 0.037238931846402805,
+      "robust_mean_corrupted_map_50_95": 0.1096971568213269,
+      "mean_corrupted_gain": 0.07245822497492409
+    },
+    {
+      "class_name": "bus",
+      "official_val_gt_instances": 98,
+      "pretrained_mean_corrupted_map_50_95": 0.22749311863475255,
+      "robust_mean_corrupted_map_50_95": 0.38155743230928335,
+      "mean_corrupted_gain": 0.1540643136745308
+    },
+    {
+      "class_name": "train",
+      "official_val_gt_instances": 23,
+      "pretrained_mean_corrupted_map_50_95": 0.0293840197441133,
+      "robust_mean_corrupted_map_50_95": 0.14409404473732507,
+      "mean_corrupted_gain": 0.11471002499321178
+    },
+    {
+      "class_name": "truck",
+      "official_val_gt_instances": 93,
+      "pretrained_mean_corrupted_map_50_95": 0.10886426353373639,
+      "robust_mean_corrupted_map_50_95": 0.2175580538501985,
+      "mean_corrupted_gain": 0.10869379031646212
+    }
+  ],
+  "per_class_inference_minimum_gt_instances": 20,
+  "rare_class_policy": "classes below 20 official-val instances are reported descriptively but excluded from the regression gate"
+}

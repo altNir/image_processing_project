@@ -69,6 +69,48 @@ def model_detections(
     ]
 
 
+def batched_model_detections(
+    images: Sequence[Image.Image],
+    model: Any,
+    image_ids: Sequence[str],
+    class_mapping: Mapping[int, str],
+    confidence: float,
+    device: str,
+    use_half: bool,
+    *,
+    batch: int = 32,
+    image_size: int = 640,
+) -> list[Detection]:
+    """Run a model on an aligned image batch and flatten mapped detections.
+
+    Ultralytics incurs substantial setup and synchronization overhead when called
+    once per image.  This path keeps the exact evaluator semantics while feeding
+    the GPU efficiently for the 10,500-image corruption benchmark.
+    """
+
+    if len(images) != len(image_ids):
+        raise ValueError("images and image_ids must have identical lengths")
+    if not images:
+        return []
+    results = model.predict(
+        list(images), conf=confidence, max_det=300, verbose=False,
+        batch=batch, imgsz=image_size, **_predict_kwargs(device, use_half),
+    )
+    detections: list[Detection] = []
+    for image_id, result in zip(image_ids, results):
+        if result.boxes is None or len(result.boxes) == 0:
+            continue
+        boxes = result.boxes.xyxy.detach().cpu().numpy()
+        scores = result.boxes.conf.detach().cpu().numpy()
+        class_ids = result.boxes.cls.detach().cpu().numpy().astype(int)
+        detections.extend(
+            Detection(image_id, class_mapping[int(class_id)], tuple(float(v) for v in bbox), float(score))
+            for bbox, score, class_id in zip(boxes, scores, class_ids)
+            if int(class_id) in class_mapping
+        )
+    return detections
+
+
 def yolo_detections(
     img_pil: Image.Image,
     model: Any,

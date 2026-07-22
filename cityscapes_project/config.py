@@ -116,11 +116,16 @@ class Parts34Config:
     gallery_samples: int = 1
     part4_train_samples: int = 0
     part4_val_samples: int = 0
-    part4_epochs: int = 20
+    part4_epochs: int = 40
     part4_image_size: int = 640
     part4_batch: int = 8
     part4_workers: int = 4
     part4_clean_fraction: float = 0.20
+    part4_train_views: int = 4
+    part4_val_views: int = 2
+    part4_internal_val_fraction: float = 0.125
+    part4_patience: int = 10
+    part4_eval_batch: int = 32
     rebuild_training_data: bool = False
     reuse_part2_results: bool = True
     part3_bootstrap_resamples: int = 1000
@@ -145,6 +150,12 @@ class Parts34Config:
             raise ValueError("Part 4 batch must be positive or -1 for automatic sizing")
         if self.part4_workers < 0:
             raise ValueError("part4_workers must be non-negative")
+        if self.part4_train_views <= 0 or self.part4_val_views <= 0:
+            raise ValueError("Part 4 view counts must be positive")
+        if not 0.0 < self.part4_internal_val_fraction < 0.5:
+            raise ValueError("part4_internal_val_fraction must be between zero and 0.5")
+        if self.part4_patience < 0 or self.part4_eval_batch <= 0:
+            raise ValueError("Part 4 patience must be non-negative and eval batch positive")
         if self.part3_bootstrap_resamples <= 0:
             raise ValueError("part3_bootstrap_resamples must be positive")
         if not 0.0 < self.part3_confidence_level < 1.0:

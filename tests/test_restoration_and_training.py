@@ -18,6 +18,7 @@ from cityscapes_project.utils.statistics import paired_bootstrap
 from cityscapes_project.pipelines.parts34 import (
     PROJECT_CLASS_TO_ID,
     choose_training_condition,
+    city_disjoint_training_split,
     detection_to_yolo_row,
 )
 from cityscapes_project.types import Detection
@@ -133,6 +134,22 @@ class QualityAndStatisticsTests(unittest.TestCase):
 
 
 class YoloDatasetTests(unittest.TestCase):
+    def test_internal_validation_is_deterministic_and_city_disjoint(self) -> None:
+        samples = [
+            types.SimpleNamespace(
+                sample_id=f"city{city}_{index}",
+                image_path=Path(f"root/city{city}/image_{index}.png"),
+            )
+            for city in range(8) for index in range(city + 2)
+        ]
+        train, validation, manifest = city_disjoint_training_split(samples, 0.20, 7)
+        train_cities = {sample.image_path.parent.name for sample in train}
+        validation_cities = {sample.image_path.parent.name for sample in validation}
+        repeated = city_disjoint_training_split(samples, 0.20, 7)
+        self.assertTrue(train_cities.isdisjoint(validation_cities))
+        self.assertEqual([sample.sample_id for sample in validation], [sample.sample_id for sample in repeated[1]])
+        self.assertEqual(manifest["strategy"], "city-disjoint-subset-of-official-train")
+
     def test_detection_is_converted_to_normalized_yolo_row(self) -> None:
         detection = Detection("image", "car", (20.0, 10.0, 60.0, 30.0))
         values = detection_to_yolo_row(detection, width=100, height=50).split()
@@ -213,12 +230,14 @@ class YoloDatasetTests(unittest.TestCase):
                 dataset_root=root,
                 artifacts_dir=Path(directory) / "artifacts",
                 part4_clean_fraction=1.0,
+                part4_train_views=1,
+                part4_val_views=1,
             )
             _, prepared = project.prepare_yolo_dataset(config)
             self.assertEqual(len(list((prepared / "images" / "train").glob("*.png"))), 1)
             self.assertEqual(len(list((prepared / "images" / "train").glob("*.jpg"))), 0)
             manifest = json.loads((prepared / "dataset_manifest.json").read_text())
-            self.assertEqual(manifest["recipe_version"], 2)
+            self.assertEqual(manifest["recipe_version"], 3)
             self.assertEqual(manifest["class_instance_counts"]["train"]["car"], 1)
 
 

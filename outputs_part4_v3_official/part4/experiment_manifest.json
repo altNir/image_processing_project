@@ -1,0 +1,111 @@
+{
+  "complete": true,
+  "recipe_version": 3,
+  "software_versions": {
+    "python": "3.12.13",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "numpy": "2.4.4",
+    "Pillow": "12.2.0",
+    "opencv-python": "5.0.0.93",
+    "torch": "2.13.0+cu130",
+    "transformers": "5.14.1",
+    "ultralytics": "8.4.103"
+  },
+  "config": {
+    "dataset_root": "data\\cityscapes_official",
+    "output_dir": "outputs_part4_v3_official",
+    "artifacts_dir": "artifacts_final",
+    "split": "val",
+    "max_samples": 0,
+    "seed": 7,
+    "device": "cuda:0",
+    "use_half": true,
+    "nfeatures": 800,
+    "canny_low_threshold": 100,
+    "canny_high_threshold": 200,
+    "canny_blur_kernel": 5,
+    "canny_tolerance_radius": 2,
+    "yolo_model": "yolov8n.pt",
+    "yolo_eval_confidence": 0.001,
+    "segformer_model": "nvidia/segformer-b0-finetuned-cityscapes-1024-1024",
+    "distortion_levels": {
+      "GaussNoise": [
+        5.0,
+        10.0,
+        20.0,
+        35.0,
+        50.0
+      ],
+      "SevereJPEG": [
+        80.0,
+        60.0,
+        40.0,
+        20.0,
+        5.0
+      ],
+      "LowLight": [
+        0.8,
+        0.6,
+        0.4,
+        0.25,
+        0.1
+      ],
+      "MotionBlur": [
+        3.0,
+        5.0,
+        9.0,
+        15.0,
+        25.0
+      ]
+    },
+    "gallery_samples": 1,
+    "part4_train_samples": 0,
+    "part4_val_samples": 0,
+    "part4_epochs": 40,
+    "part4_image_size": 640,
+    "part4_batch": 32,
+    "part4_workers": 8,
+    "part4_clean_fraction": 0.2,
+    "part4_train_views": 4,
+    "part4_val_views": 2,
+    "part4_internal_val_fraction": 0.125,
+    "part4_patience": 10,
+    "part4_eval_batch": 32,
+    "rebuild_training_data": false,
+    "reuse_part2_results": true,
+    "part3_bootstrap_resamples": 1000,
+    "part3_confidence_level": 0.95,
+    "fine_tuned_weights": null
+  },
+  "prepared_dataset": "artifacts_final\\part4\\cityscapes_robust_train-full_val-full_seed-7_c7a439ac62",
+  "tracked_prepared_dataset_metadata": "outputs_part4_v3_official\\part4\\training_dataset",
+  "prepared_dataset_manifest_sha256": "824cd6a22779249ce192a785b6e0f81f1d1fb302222f12a4ddc01323f482fc01",
+  "checkpoints": [
+    {
+      "seed": 7,
+      "path": "outputs_part4_v3_official\\part4\\checkpoints\\robust_seed_7_best.pt",
+      "sha256": "e96e5b810f08497e48b8e691ce5e2029c5d46784a58f862bac0acbb1f3320405",
+      "training_seconds_this_invocation": 1595.1214694999999
+    },
+    {
+      "seed": 17,
+      "path": "outputs_part4_v3_official\\part4\\checkpoints\\robust_seed_17_best.pt",
+      "sha256": "a2136a63c0933921f1bf730024ab55a54594417531bc0b619c4e67dbdf0801ae",
+      "training_seconds_this_invocation": 1865.8815533999987
+    },
+    {
+      "seed": 29,
+      "path": "outputs_part4_v3_official\\part4\\checkpoints\\robust_seed_29_best.pt",
+      "sha256": "6ac524e76a321d5b5be96f7b6e300d7f3e8998e6b8c108da2b37d3f910ddf93b",
+      "training_seconds_this_invocation": 1847.034023199998
+    }
+  ],
+  "methodological_guards": [
+    "official Cityscapes val is untouched until final evaluation",
+    "internal validation is city-disjoint and drawn only from official train",
+    "every source has an exact clean PNG anchor",
+    "corrupted views are balanced over all 20 distortion/severity pairs",
+    "three independent deterministic training seeds are reported without cherry-picking",
+    "all models use the same 500 images and deterministic corruptions"
+  ]
+}

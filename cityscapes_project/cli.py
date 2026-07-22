@@ -51,11 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gallery-samples", type=int, default=4)
     parser.add_argument("--part4-train-samples", type=int, default=0)
     parser.add_argument("--part4-val-samples", type=int, default=0)
-    parser.add_argument("--part4-epochs", type=int, default=20)
+    parser.add_argument("--part4-epochs", type=int, default=40)
     parser.add_argument("--part4-image-size", type=int, default=640)
     parser.add_argument("--part4-batch", type=int, default=8)
     parser.add_argument("--part4-workers", type=int, default=4)
     parser.add_argument("--part4-clean-fraction", type=float, default=0.20)
+    parser.add_argument("--part4-train-views", type=int, default=4)
+    parser.add_argument("--part4-val-views", type=int, default=2)
+    parser.add_argument("--part4-internal-val-fraction", type=float, default=0.125)
+    parser.add_argument("--part4-patience", type=int, default=10)
+    parser.add_argument("--part4-eval-batch", type=int, default=32)
     parser.add_argument("--rebuild-training-data", action="store_true")
     parser.add_argument("--part3-bootstrap-resamples", type=int, default=1000)
     parser.add_argument("--part3-confidence-level", type=float, default=0.95)
@@ -112,6 +117,11 @@ def _parts34_config(
         part4_batch=args.part4_batch,
         part4_workers=args.part4_workers,
         part4_clean_fraction=args.part4_clean_fraction,
+        part4_train_views=args.part4_train_views,
+        part4_val_views=args.part4_val_views,
+        part4_internal_val_fraction=args.part4_internal_val_fraction,
+        part4_patience=args.part4_patience,
+        part4_eval_batch=args.part4_eval_batch,
         rebuild_training_data=args.rebuild_training_data,
         reuse_part2_results=not args.no_reuse_part2,
         part3_bootstrap_resamples=args.part3_bootstrap_resamples,

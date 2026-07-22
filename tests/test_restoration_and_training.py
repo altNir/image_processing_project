@@ -11,6 +11,7 @@ from PIL import Image
 
 import cityscapes_project.pipelines.parts34 as project
 from cityscapes_project.config import Parts34Config
+from cityscapes_project.pipelines.part4_final import _mean_t_interval_95
 from cityscapes_project.methods.distortions import apply_aug, compute_snr
 from cityscapes_project.methods.restoration import restoration_parameters, restore_image
 from cityscapes_project.methods.quality import compute_mae, compute_psnr, compute_ssim
@@ -131,6 +132,17 @@ class QualityAndStatisticsTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertGreater(first["mean_improvement"], 0.0)
         self.assertEqual(first["win_rate"], 0.75)
+
+    def test_three_seed_t_interval_is_small_sample_and_symmetric(self) -> None:
+        interval = _mean_t_interval_95([0.09, 0.10, 0.11])
+        self.assertEqual(interval["n"], 3)
+        self.assertAlmostEqual(interval["mean"], 0.10)
+        self.assertAlmostEqual(
+            interval["mean"] - interval["ci_low"],
+            interval["ci_high"] - interval["mean"],
+        )
+        self.assertLess(interval["ci_low"], 0.09)
+        self.assertGreater(interval["ci_high"], 0.11)
 
 
 class YoloDatasetTests(unittest.TestCase):

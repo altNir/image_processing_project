@@ -120,27 +120,42 @@ All models were evaluated with detector evaluator v2 on the same 500 official va
 | Clean mAP@0.50:0.95 | 0.1600 | 0.2581 ± 0.0091 | +0.0981 |
 | Mean over 20 corruptions | 0.1312 | 0.2346 ± 0.0060 | +0.1035 |
 
-Mean corrupted mAP improved by 78.9% relative, and all 20 corrupted conditions improved. A deterministic 20,000-resample condition-paired bootstrap gives a 95% interval of `[+0.0987, +0.1089]` for mean mAP gain. The weakest condition gain was still +0.0881 (Gaussian noise sigma 10); the largest was +0.1309 (Gaussian noise sigma 50). All pre-registered gates passed: clean change at least -0.005, positive lower confidence bound, at least 16/20 nonnegative conditions, and no supported-class regression larger than 0.01.
+Mean corrupted mAP improved by 78.9% relative. All 60 seed-condition comparisons improved, not only the three-seed average: the weakest individual-seed gain was +0.0800. A deterministic 20,000-resample condition-paired bootstrap gives `[+0.0987, +0.1089]`; a conservative Student-t interval across the three independently trained seed means gives `[+0.0886, +0.1183]`. The corresponding seed-level clean-gain interval is `[+0.0754, +0.1208]`. These small-sample seed intervals are stability diagnostics, not population-level claims.
 
-| Class | Pretrained corrupted mean | Robust corrupted mean | Change |
-|---|---:|---:|---:|
-| Person | 0.1335 | 0.2085 | +0.0750 |
-| Bicycle | 0.0804 | 0.1487 | +0.0684 |
-| Car | 0.3014 | 0.4323 | +0.1309 |
-| Motorcycle | 0.0372 | 0.1097 | +0.0725 |
-| Bus | 0.2275 | 0.3816 | +0.1541 |
-| Train | 0.0294 | 0.1441 | +0.1147 |
-| Truck | 0.1089 | 0.2176 | +0.1087 |
+| Distortion family | Mild → severe setting | Mean SNR, mild → severe | Pretrained mean | Robust mean | Mean gain | Smallest condition gain |
+|---|---:|---:|---:|---:|---:|---:|
+| Gaussian noise | σ 5 → 50 | 25.18 → 6.15 dB | 0.1013 | 0.2123 | +0.1110 | +0.0881 |
+| Severe JPEG | quality 80 → 5 | 31.23 → 18.48 dB | 0.1455 | 0.2414 | +0.0959 | +0.0943 |
+| Low light | gain 0.80 → 0.10 | 13.82 → 0.87 dB | 0.1450 | 0.2486 | +0.1036 | +0.0957 |
+| Motion blur | kernel 3 → 25 | 33.23 → 18.25 dB | 0.1330 | 0.2363 | +0.1033 | +0.1001 |
 
-The final model improves every class on average; notably, bus and train no longer collapse as they did in the preliminary peer checkpoint. Severe corruption still reduces absolute performance, but robust degradation is much slower and seed variability remains small.
+The effect is not an artifact of retaining very low-confidence predictions. At the fixed 0.25 operating threshold, mean corrupted precision rises from 0.5413 to 0.6006, recall from 0.1991 to 0.3604, and F1 from 0.2603 to 0.4418. mAP@0.50 rises from 0.2166 to 0.3909.
+
+| Class (official-val instances) | Pretrained corrupted mean | Robust mean ± seed SD | Change | Worst condition change |
+|---|---:|---:|---:|---:|
+| Person (3,395) | 0.1335 | 0.2085 ± 0.0053 | +0.0750 | +0.0490 |
+| Bicycle (1,165) | 0.0804 | 0.1487 ± 0.0013 | +0.0684 | +0.0539 |
+| Car (4,653) | 0.3014 | 0.4323 ± 0.0029 | +0.1309 | +0.1036 |
+| Motorcycle (149) | 0.0372 | 0.1097 ± 0.0030 | +0.0725 | +0.0372 |
+| Bus (98) | 0.2275 | 0.3816 ± 0.0193 | +0.1541 | +0.1067 |
+| Train (23) | 0.0294 | 0.1441 ± 0.0150 | +0.1147 | +0.0785 |
+| Truck (93) | 0.1089 | 0.2176 ± 0.0076 | +0.1087 | +0.0933 |
+
+All 140 class-condition averages improved. Bus and train no longer collapse as in the preliminary peer checkpoint, although their larger seed SDs are interpreted cautiously because official validation contains only 98 bus and 23 train instances. All four acceptance gates declared before the final run passed: clean change at least -0.005, positive condition-bootstrap lower bound, at least 16/20 nonnegative conditions, and no supported-class regression larger than 0.01. The observed results exceed these gates by wide margins.
 
 ![Three-seed robustness curves](outputs_part4_v3_official/part4/figures/robustness_curves_three_seeds.png)
 
+![Performance versus measured SNR](outputs_part4_v3_official/part4/figures/robustness_vs_snr.png)
+
 ![Robustness gain heatmap](outputs_part4_v3_official/part4/figures/robustness_gain_heatmap.png)
 
-![Per-class robustness gain](outputs_part4_v3_official/part4/figures/per_class_robustness_gain.png)
+![Per-class corrupted performance with seed variability](outputs_part4_v3_official/part4/figures/per_class_robustness_gain.png)
+
+![Per-seed gain stability](outputs_part4_v3_official/part4/figures/gain_stability_three_seeds.png)
 
 ![Three-seed training convergence](outputs_part4_v3_official/part4/figures/training_convergence_three_seeds.png)
+
+The inference is deliberately bounded. Evaluator v2 is a matched project evaluator, not the official Cityscapes detection-server metric; three seeds cannot characterize every possible training run; and the pretrained comparison combines Cityscapes domain adaptation with corruption-aware training. A clean-only Cityscapes fine-tuning control would be needed to attribute the entire gain specifically to corruption augmentation. That ablation would strengthen a research paper, but it is not required by the course Part 4 specification and does not undermine the requested pretrained-versus-robust comparison.
 
 ## Dataset
 
@@ -329,6 +344,7 @@ outputs/
     |-- model_condition_metrics.csv
     |-- detection_per_class.csv
     |-- seed_summary.csv
+    |-- distortion_family_summary.csv
     |-- per_class_robustness_summary.csv
     |-- final_analysis.json
     |-- experiment_manifest.json
@@ -350,6 +366,8 @@ Useful tracked results:
 - [Part 3 reproducibility manifest](outputs_big_125/part3/restoration_manifest.json)
 - [Part 4 final analysis](outputs_part4_v3_official/part4/final_analysis.json)
 - [Part 4 condition results](outputs_part4_v3_official/part4/fine_tuning_summary.csv)
+- [Part 4 distortion-family audit](outputs_part4_v3_official/part4/distortion_family_summary.csv)
+- [Part 4 class and disparity audit](outputs_part4_v3_official/part4/per_class_robustness_summary.csv)
 - [Part 4 reproducibility manifest](outputs_part4_v3_official/part4/experiment_manifest.json)
 - [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
 - [Part 3 recipe-v3 run configuration](outputs_part3_v3_125_official/run_manifest_parts_3_4.json)
@@ -435,6 +453,9 @@ The replacement 125-image Part 3 run took 67 minutes on an RTX 5090 system. Fina
 - The tracked Parts 1-3 results cover 125 of 500 validation images; final Part 4 uses all 500.
 - Parts 1-2 were produced before detection evaluator v2 and should be audited for strict cross-part detection consistency.
 - Part 4's confidence interval resamples the 20 declared corruption conditions; it quantifies consistency across this benchmark suite, not uncertainty over every possible real-world corruption.
+- Part 4 also reports Student-t seed intervals, but three seeds provide a stability check rather than precise population-level uncertainty.
+- Part 4 uses a matched custom AP evaluator rather than the official Cityscapes detection server; all compared models use exactly the same implementation and samples.
+- The Part 4 baseline is the original COCO checkpoint. A clean-only Cityscapes fine-tuning control would be required to separate domain-adaptation gains from corruption-augmentation gains.
 - Severity-aware restoration can still remove features useful to downstream models; Part 3 therefore reports positive and negative gains.
 - The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
 - Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.

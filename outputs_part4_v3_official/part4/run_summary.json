@@ -37,6 +37,20 @@
       "win_rate": 1.0,
       "tie_rate": 0.0
     },
+    "seed_level_corrupted_gain_t_interval_95": {
+      "n": 3,
+      "mean": 0.10345373037440077,
+      "sample_sd": 0.005964210277852254,
+      "ci_low": 0.08863781070186069,
+      "ci_high": 0.11826965004694084
+    },
+    "seed_level_clean_gain_t_interval_95": {
+      "n": 3,
+      "mean": 0.09810157962194184,
+      "sample_sd": 0.009126226226452238,
+      "ci_low": 0.07543077688605374,
+      "ci_high": 0.12077238235782994
+    },
     "acceptance_criteria": {
       "clean_map_loss_no_worse_than_0.005": true,
       "corrupted_gain_95ci_strictly_positive": true,
@@ -70,58 +84,185 @@
         "nonnegative_conditions": 20
       }
     ],
+    "per_distortion_family": [
+      {
+        "distortion": "GaussNoise",
+        "mild_level": "5.0",
+        "severe_level": "50.0",
+        "mild_mean_snr_db": "25.178301720729184",
+        "severe_mean_snr_db": "6.148252686035837",
+        "pretrained_mean_map_50_95": 0.10125775031021231,
+        "robust_mean_map_50_95": 0.21228193518922592,
+        "mean_gain": 0.11102418487901358,
+        "minimum_condition_gain": 0.08814600988388938,
+        "maximum_condition_gain": 0.13091318900819363,
+        "seed_mean_gain_sd": 0.00656795906000182
+      },
+      {
+        "distortion": "SevereJPEG",
+        "mild_level": "80.0",
+        "severe_level": "5.0",
+        "mild_mean_snr_db": "31.228169114230294",
+        "severe_mean_snr_db": "18.476975529710028",
+        "pretrained_mean_map_50_95": 0.14548462566499407,
+        "robust_mean_map_50_95": 0.2414096386324413,
+        "mean_gain": 0.09592501296744718,
+        "minimum_condition_gain": 0.09434568517056369,
+        "maximum_condition_gain": 0.09930372881756933,
+        "seed_mean_gain_sd": 0.005493410696913363
+      },
+      {
+        "distortion": "LowLight",
+        "mild_level": "0.8",
+        "severe_level": "0.1",
+        "mild_mean_snr_db": "13.821119120944102",
+        "severe_mean_snr_db": "0.873418402807999",
+        "pretrained_mean_map_50_95": 0.14500078089806756,
+        "robust_mean_map_50_95": 0.24856141761925515,
+        "mean_gain": 0.10356063672118758,
+        "minimum_condition_gain": 0.09570035835264343,
+        "maximum_condition_gain": 0.1252088883150932,
+        "seed_mean_gain_sd": 0.006791932913176212
+      },
+      {
+        "distortion": "MotionBlur",
+        "mild_level": "3.0",
+        "severe_level": "25.0",
+        "mild_mean_snr_db": "33.23259105302922",
+        "severe_mean_snr_db": "18.250329146935705",
+        "pretrained_mean_map_50_95": 0.1330031743776711,
+        "robust_mean_map_50_95": 0.2363082613076259,
+        "mean_gain": 0.10330508692995481,
+        "minimum_condition_gain": 0.1001217583390469,
+        "maximum_condition_gain": 0.11091202747894598,
+        "seed_mean_gain_sd": 0.006721227821983158
+      }
+    ],
     "per_class": [
       {
         "class_name": "person",
         "official_val_gt_instances": 3395,
         "pretrained_mean_corrupted_map_50_95": 0.1335190398259645,
         "robust_mean_corrupted_map_50_95": 0.20854978084441894,
-        "mean_corrupted_gain": 0.0750307410184545
+        "robust_seed_sd": 0.005289883299250093,
+        "mean_corrupted_gain": 0.0750307410184545,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.04898326925445133,
+        "worst_condition": "SevereJPEG",
+        "worst_level": "5.0"
       },
       {
         "class_name": "bicycle",
         "official_val_gt_instances": 1165,
         "pretrained_mean_corrupted_map_50_95": 0.08037398747689854,
         "robust_mean_corrupted_map_50_95": 0.14873296966361577,
-        "mean_corrupted_gain": 0.06835898218671722
+        "robust_seed_sd": 0.0012886521196321943,
+        "mean_corrupted_gain": 0.06835898218671722,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.05391734597176699,
+        "worst_condition": "GaussNoise",
+        "worst_level": "50.0"
       },
       {
         "class_name": "car",
         "official_val_gt_instances": 4653,
         "pretrained_mean_corrupted_map_50_95": 0.3014327186272857,
         "robust_mean_corrupted_map_50_95": 0.4322927540837907,
-        "mean_corrupted_gain": 0.13086003545650488
+        "robust_seed_sd": 0.0029096038712110037,
+        "mean_corrupted_gain": 0.13086003545650488,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.1036448989689499,
+        "worst_condition": "SevereJPEG",
+        "worst_level": "20.0"
       },
       {
         "class_name": "motorcycle",
         "official_val_gt_instances": 149,
         "pretrained_mean_corrupted_map_50_95": 0.037238931846402805,
         "robust_mean_corrupted_map_50_95": 0.1096971568213269,
-        "mean_corrupted_gain": 0.07245822497492409
+        "robust_seed_sd": 0.0029815765934814243,
+        "mean_corrupted_gain": 0.07245822497492409,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.037160677872039055,
+        "worst_condition": "GaussNoise",
+        "worst_level": "50.0"
       },
       {
         "class_name": "bus",
         "official_val_gt_instances": 98,
         "pretrained_mean_corrupted_map_50_95": 0.22749311863475255,
         "robust_mean_corrupted_map_50_95": 0.38155743230928335,
-        "mean_corrupted_gain": 0.1540643136745308
+        "robust_seed_sd": 0.019332403565506417,
+        "mean_corrupted_gain": 0.1540643136745308,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.10668421577470932,
+        "worst_condition": "GaussNoise",
+        "worst_level": "5.0"
       },
       {
         "class_name": "train",
         "official_val_gt_instances": 23,
         "pretrained_mean_corrupted_map_50_95": 0.0293840197441133,
         "robust_mean_corrupted_map_50_95": 0.14409404473732507,
-        "mean_corrupted_gain": 0.11471002499321178
+        "robust_seed_sd": 0.015026580535236625,
+        "mean_corrupted_gain": 0.11471002499321178,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.07848776074458352,
+        "worst_condition": "SevereJPEG",
+        "worst_level": "5.0"
       },
       {
         "class_name": "truck",
         "official_val_gt_instances": 93,
         "pretrained_mean_corrupted_map_50_95": 0.10886426353373639,
         "robust_mean_corrupted_map_50_95": 0.2175580538501985,
-        "mean_corrupted_gain": 0.10869379031646212
+        "robust_seed_sd": 0.007598090162885218,
+        "mean_corrupted_gain": 0.10869379031646212,
+        "negative_condition_count": 0,
+        "worst_condition_gain": 0.09331065211221476,
+        "worst_condition": "SevereJPEG",
+        "worst_level": "5.0"
       }
     ],
+    "corrupted_operating_metrics": {
+      "map_50_95": {
+        "pretrained": 0.13118658281273626,
+        "robust_mean": 0.23464031318713705,
+        "robust_seed_sd": 0.00596421027785224,
+        "absolute_change": 0.10345373037440078
+      },
+      "map_50": {
+        "pretrained": 0.2166167445960197,
+        "robust_mean": 0.3909329135706116,
+        "robust_seed_sd": 0.009600363660830714,
+        "absolute_change": 0.1743161689745919
+      },
+      "mean_precision_50_at_operating_confidence": {
+        "pretrained": 0.5413325429575616,
+        "robust_mean": 0.6005679303611914,
+        "robust_seed_sd": 0.01130183490868365,
+        "absolute_change": 0.05923538740362977
+      },
+      "mean_recall_50_at_operating_confidence": {
+        "pretrained": 0.1991253221630086,
+        "robust_mean": 0.36038277418549675,
+        "robust_seed_sd": 0.015135837501883572,
+        "absolute_change": 0.16125745202248815
+      },
+      "mean_f1_50_at_operating_confidence": {
+        "pretrained": 0.2603140877684113,
+        "robust_mean": 0.44184289902786694,
+        "robust_seed_sd": 0.011203722188121068,
+        "absolute_change": 0.18152881125945564
+      }
+    },
     "per_class_inference_minimum_gt_instances": 20,
-    "rare_class_policy": "classes below 20 official-val instances are reported descriptively but excluded from the regression gate"
+    "rare_class_policy": "classes below 20 official-val instances are reported descriptively but excluded from the regression gate",
+    "interpretation_limits": [
+      "the matched evaluator is project evaluator v2, not the official Cityscapes detection server",
+      "three training seeds support a small-sample stability check but not population-level seed inference",
+      "the pretrained comparison combines Cityscapes domain adaptation and corruption-aware training; a clean-only fine-tuned control would be needed to isolate their causal contributions",
+      "the condition bootstrap measures consistency across the declared corruption grid, not uncertainty over all real-world corruptions"
+    ]
   }
 }

@@ -4,7 +4,7 @@ This course project studies how classical and deep-learning vision methods behav
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
-> **Current result status:** Parts 1-3 include matched 125-image official-Cityscapes results. Part 3 uses the final recipe-v3 restoration implementation. Part 4 is final recipe v3: three independently seeded robust detectors, city-disjoint model selection, and evaluator-v2 results on all 500 untouched validation images.
+> **Current result status:** Parts 1-3 include matched 125-image official-Cityscapes results. Part 3 uses the final train-only-tuned recipe-v4 restoration implementation. Part 4 is final recipe v3: three independently seeded robust detectors, city-disjoint model selection, and evaluator-v2 results on all 500 untouched validation images.
 
 ## Project overview
 
@@ -50,7 +50,7 @@ Cityscapes instance masks are converted to visible object bounding boxes. Detect
 | Low light | severity-scaled gamma lifting and CLAHE, blended conservatively at mild levels |
 | Motion blur | known-PSF Tikhonov deconvolution with a Laplacian smoothness prior and reflected-border handling |
 
-Restoration recipe version 3 is based on classical methods covered by the course and their primary literature: [non-local means](https://doi.org/10.1109/CVPR.2005.38), [signal-adaptive JPEG deblocking](https://doi.org/10.1109/83.661000), [CLAHE](https://doi.org/10.1016/0734-189X(87)90186-X), and [Tikhonov regularization](https://doi.org/10.2307/2006224). Parameters are deterministic functions of the declared synthetic severity and are not fitted on the validation images.
+Restoration recipe version 4 is based on classical methods covered by the course and their primary literature: [non-local means](https://doi.org/10.1109/CVPR.2005.38), [signal-adaptive JPEG deblocking](https://doi.org/10.1109/83.661000), [CLAHE](https://doi.org/10.1016/0734-189X(87)90186-X), and [Tikhonov regularization](https://doi.org/10.2307/2006224). Its severity schedules remain unchanged from v3. A bounded train-only study selected one fixed output-strength scalar per distortion family from `{0.70, 0.85, 1.00}`; v4 freezes `0.70` for Gaussian noise and JPEG and `1.00` for low light and motion blur. The scalar never varies by image, severity, or task.
 
 Part 3 is a paired experiment: the distorted and restored measurements use the same Cityscapes image, annotation, and distortion seed. In addition to aggregate ORB, Canny, SegFormer, and YOLO results, it records per-image PSNR, luminance SSIM, MAE, runtime, and restoration parameters. A deterministic paired bootstrap reports the mean improvement, median improvement, 95% confidence interval, win rate, and tie rate for every image-level metric. Negative gains remain visible rather than being filtered out.
 
@@ -92,20 +92,24 @@ The results expose different failure modes: low light and motion blur strongly a
 
 ### Part 3: restoration
 
-The final Part 3 run used seed `7`, 125 official validation images, all 20 distortion/severity variants, recipe version 3, and detection evaluator version 2. Matching Part 2 ORB, Canny, and SegFormer baselines were reused; image-quality metrics and both distorted/restored YOLO predictions were recomputed. The run completed in 67 minutes.
+Recipe v4 was selected without inspecting official `val`. Development used 125 city-balanced official-`train` images from Darmstadt, Krefeld, Monchengladbach, and Ulm. The 12 family-level candidates balanced fidelity (PSNR, SSIM, MAE) and classical structure (ORB, Canny). The frozen candidates were then checked on 12 images from disjoint train cities, Aachen and Bochum; mean segmentation and detection change versus v3 had to remain above `-0.005`. Both proposed `0.70` strengths passed. There is no per-image routing, identity gate, or validation-set tuning.
+
+The final run used seed `7`, the same 125 official validation images as v3, all 20 variants, recipe v4, and detection evaluator v2. Matching Part 2 ORB, Canny, and SegFormer baselines were structurally validated and reused; quality metrics and both distorted/restored YOLO predictions were recomputed. Batched YOLO inference reduced overhead without changing its checkpoint, image size, confidence floor, or evaluator. The run completed in 66.6 minutes.
 
 | Strongest condition | PSNR gain | SSIM gain | Segmentation mIoU gain | Detection mAP gain |
 |---|---:|---:|---:|---:|
-| Gaussian noise, sigma 50 | +6.832 dB | +0.391 | -0.0135 | +0.0420 |
-| JPEG, quality 5 | +0.629 dB | +0.040 | +0.0188 | +0.0050 |
+| Gaussian noise, sigma 50 | +4.857 dB | +0.171 | +0.0114 | +0.0414 |
+| JPEG, quality 5 | +0.530 dB | +0.032 | +0.0150 | +0.0044 |
 | Low light, factor 0.10 | +6.476 dB | +0.707 | +0.0297 | +0.0684 |
-| Motion blur, kernel 25 | +1.766 dB | +0.028 | -0.0240 | +0.0293 |
+| Motion blur, kernel 25 | +1.766 dB | +0.028 | -0.0240 | +0.0286 |
 
-SSIM improved in all 20 variants, PSNR and MAE improved in 19, and detection mAP improved in 17. Canny improved in 14 variants, while segmentation improved in 9: restoration reliably improved visual fidelity and usually detection, but some denoising/deblurring removed cues useful to ORB, Canny, or SegFormer. Paired bootstrap confidence intervals and win rates are reported for every image-level metric.
+SSIM improved in all 20 variants; PSNR and MAE improved in 19; detection mAP improved in 19; Canny in 14; segmentation in 11; and ORB in 7. On the identical v3/v4 cohort, the conservative noise/JPEG blend reduced average fidelity-gain magnitude but improved mean ORB retention by `+0.01569`/`+0.00252` and Canny F1 by `+0.01246`/`+0.00949`. Noise segmentation improved by `+0.01008`; JPEG changed by `-0.00081`. Cross-recipe detection deltas are not presented as causal because v4 uses batched inference, although each v4 distorted/restored comparison remains internally matched. Paired bootstrap intervals and win rates retain every positive and negative image-level result.
 
-![Part 3 quality gains and runtime](outputs_part3_v3_125_official/part3/figures/restoration_quality.png)
+![Part 3 quality gains and runtime](outputs_part3_v4_125_official/part3/figures/restoration_quality.png)
 
-![Part 3 distorted versus restored performance](outputs_part3_v3_125_official/part3/figures/restored_performance.png)
+![Part 3 distorted versus restored performance](outputs_part3_v4_125_official/part3/figures/restored_performance.png)
+
+![Part 3 recipe v4 versus v3](outputs_part3_v4_125_official/part3/figures/recipe_v4_vs_v3.png)
 
 ### Part 4: distortion-aware fine-tuning
 
@@ -360,19 +364,22 @@ Useful tracked results:
 - [Part 1 clean summary](outputs_big_125/part1/clean_summary.json)
 - [Part 2 aggregate results](outputs_big_125/part2/distorted_summary.csv)
 - [Part 2 per-image results](outputs_big_125/part2/distorted_per_image.csv)
-- [Part 3 aggregate results](outputs_big_125/part3/restoration_summary.csv)
-- [Part 3 per-image results](outputs_big_125/part3/restoration_per_image.csv)
-- [Part 3 paired statistics](outputs_big_125/part3/paired_statistics.csv)
-- [Part 3 reproducibility manifest](outputs_big_125/part3/restoration_manifest.json)
+- [Part 3 recipe-v4 aggregate results](outputs_part3_v4_125_official/part3/restoration_summary.csv)
+- [Part 3 recipe-v4 per-image results](outputs_part3_v4_125_official/part3/restoration_per_image.csv)
+- [Part 3 paired bootstrap statistics](outputs_part3_v4_125_official/part3/paired_statistics.csv)
+- [Part 3 reproducibility manifest](outputs_part3_v4_125_official/part3/restoration_manifest.json)
+- [Part 3 train-only tuning manifest](outputs_part3_v4_tuning_125/tuning_manifest.json)
+- [Part 3 disjoint-city confirmation](outputs_part3_v4_confirmation/confirmation_manifest.json)
+- [Part 3 paired v4-v3 comparison](outputs_part3_v4_125_official/part3/figures/recipe_v4_vs_v3.csv)
 - [Part 4 final analysis](outputs_part4_v3_official/part4/final_analysis.json)
 - [Part 4 condition results](outputs_part4_v3_official/part4/fine_tuning_summary.csv)
 - [Part 4 distortion-family audit](outputs_part4_v3_official/part4/distortion_family_summary.csv)
 - [Part 4 class and disparity audit](outputs_part4_v3_official/part4/per_class_robustness_summary.csv)
 - [Part 4 reproducibility manifest](outputs_part4_v3_official/part4/experiment_manifest.json)
 - [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
-- [Part 3 recipe-v3 run configuration](outputs_part3_v3_125_official/run_manifest_parts_3_4.json)
+- [Part 3 recipe-v4 run configuration](outputs_part3_v4_125_official/run_manifest_parts_3_4.json)
 
-`outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v3_125_official/` contains the final Part 3 results, and `outputs_part4_v3_official/` contains the final Part 4 outputs and checkpoints. `incomplete_old_run/` is retained only for provenance and must not be combined with current results.
+`outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v4_125_official/` contains the final Part 3 results; `outputs_part3_v4_tuning_125/` and `outputs_part3_v4_confirmation/` record the train-only selection protocol. `outputs_part4_v3_official/` contains the final Part 4 outputs and checkpoints. Earlier Part 3 outputs remain provenance only and must not be combined with v4.
 
 ## Reproducibility and evaluation design
 
@@ -381,6 +388,8 @@ Useful tracked results:
 - Part 3 also records RGB PSNR/MAE and luminance SSIM for complementary fidelity and structure measurements.
 - Every image-level Part 3 comparison is paired and includes a deterministic bootstrap confidence interval and win rate.
 - Part 2 and Part 3 reuse the same image IDs and distortion seeds for paired comparisons.
+- Part 3 tuning and confirmation use only official `train`, with disjoint city groups; official `val` is evaluation-only.
+- Recipe v4 uses one frozen scalar per distortion family, shared across all images, severities, and downstream tasks.
 - Semantic void label `255` is ignored.
 - Detection uses a low confidence floor and 101-point AP interpolation at IoU thresholds 0.50 through 0.95.
 - Detection also reports precision, recall, and F1 at confidence `0.25`; the terminal precision from the `0.001` AP floor is retained only for audit compatibility.
@@ -430,6 +439,9 @@ images_project/
 |   |-- test_restoration_and_training.py
 |   `-- test_timing.py
 |-- scripts/run_part4_final.py      # Reproducible final Part 4 entry point
+|-- scripts/tune_part3_restoration.py     # Bounded official-train tuning
+|-- scripts/confirm_part3_restoration.py  # Disjoint-train-city DL guardrail
+|-- scripts/compare_part3_recipes.py      # Exact paired v3-v4 comparison
 |-- requirements.txt
 `-- setup_cuda.ps1
 ```
@@ -446,7 +458,7 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, se
 
 ## Runtime estimate
 
-The replacement 125-image Part 3 run took 67 minutes on an RTX 5090 system. Final Part 4 took 2 hours 37 minutes on the same system: 27 minutes to prepare 11,154 lossless views, about 88 minutes across three training seeds, 42 minutes for the complete four-model/21-condition evaluation, and under one minute for statistics and figures. A 500-image Part 3 run is estimated at roughly 4.5 hours on this system.
+The final 125-image Part 3 run took 66.6 minutes on an RTX 5090 system. Its preceding 125-image CPU-heavy tuning pass took 49.2 minutes and the 12-image deep-model confirmation took 6.5 minutes. Final Part 4 took 2 hours 37 minutes on the same system: 27 minutes to prepare 11,154 lossless views, about 88 minutes across three training seeds, 42 minutes for the complete four-model/21-condition evaluation, and under one minute for statistics and figures. A 500-image Part 3 run is estimated at roughly 4.5 hours.
 
 ## Assumptions and known limitations
 

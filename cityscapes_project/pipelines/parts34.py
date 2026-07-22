@@ -42,12 +42,12 @@ from cityscapes_project.methods.detection import (
     batched_model_detections,
     evaluate_detections,
     model_detections,
-    yolo_detections,
 )
 from cityscapes_project.methods.distortions import apply_aug, compute_snr, stable_distortion_seed
 from cityscapes_project.methods.quality import compute_quality_metrics
 from cityscapes_project.methods.restoration import (
     RESTORATION_METHODS,
+    RESTORATION_OUTPUT_STRENGTH,
     RESTORATION_RECIPE_VERSION,
     restoration_parameters,
     restore_image_with_metadata,
@@ -224,6 +224,39 @@ def run_part3(
             pred_rest: list[Detection] = []
             ground_truth: list[Detection] = []
             variant_rows: list[dict[str, Any]] = []
+            detection_distorted_images: list[Image.Image] = []
+            detection_restored_images: list[Image.Image] = []
+            detection_image_ids: list[str] = []
+            detection_pending_rows: list[dict[str, Any]] = []
+
+            def flush_detection_batch() -> None:
+                if not detection_image_ids:
+                    return
+                batch_distorted = batched_model_detections(
+                    detection_distorted_images, detector, detection_image_ids,
+                    COCO_ID_TO_SHARED_CLASS, config.yolo_eval_confidence, device,
+                    config.use_half, batch=config.part4_eval_batch,
+                    image_size=config.part4_image_size,
+                )
+                batch_restored = batched_model_detections(
+                    detection_restored_images, detector, detection_image_ids,
+                    COCO_ID_TO_SHARED_CLASS, config.yolo_eval_confidence, device,
+                    config.use_half, batch=config.part4_eval_batch,
+                    image_size=config.part4_image_size,
+                )
+                pred_dist.extend(batch_distorted)
+                pred_rest.extend(batch_restored)
+                distorted_counts = Counter(item.image_id for item in batch_distorted)
+                restored_counts = Counter(item.image_id for item in batch_restored)
+                for image_id, pending in zip(detection_image_ids, detection_pending_rows):
+                    pending["detections_distorted"] = distorted_counts[image_id]
+                    pending["detections_restored"] = restored_counts[image_id]
+                for pending_image in detection_distorted_images + detection_restored_images:
+                    pending_image.close()
+                detection_distorted_images.clear()
+                detection_restored_images.clear()
+                detection_image_ids.clear()
+                detection_pending_rows.clear()
 
             for image_index, sample in enumerate(samples, 1):
                 LOGGER.info("  image [%d/%d] %s", image_index, len(samples), sample.sample_id)
@@ -263,20 +296,7 @@ def run_part3(
                 )
                 seg_rest.update(segmentation_rest, label)
 
-                detections_rest = yolo_detections(
-                    restored, detector, sample.sample_id,
-                    config.yolo_eval_confidence, device, config.use_half,
-                )
-                pred_rest.extend(detections_rest)
                 ground_truth.extend(gt)
-
-                # Detection is always recomputed so both conditions use evaluator
-                # version 2, even when costly Part 2 segmentation/classical rows are reused.
-                detections_dist = yolo_detections(
-                    distorted, detector, sample.sample_id,
-                    config.yolo_eval_confidence, device, config.use_half,
-                )
-                pred_dist.extend(detections_dist)
 
                 rest_ious = compute_ious(segmentation_rest, label)
                 if part2_cache is None:
@@ -336,12 +356,18 @@ def run_part3(
                     "orb_restored": orb_rest["match_retention"],
                     "canny_restored": canny_rest["f1"],
                     "seg_restored_image_miou": float(np.mean(list(rest_ious.values()))) if rest_ious else 0.0,
-                    "detections_restored": len(detections_rest),
-                    "detections_distorted": len(detections_dist),
+                    "detections_restored": 0,
+                    "detections_distorted": 0,
                     **distorted_values,
                 }
                 per_image.append(row)
                 variant_rows.append(row)
+                detection_distorted_images.append(distorted)
+                detection_restored_images.append(restored)
+                detection_image_ids.append(sample.sample_id)
+                detection_pending_rows.append(row)
+                if len(detection_image_ids) >= config.part4_eval_batch:
+                    flush_detection_batch()
 
                 if config.gallery_samples > 0 and image_index == 1 and level_index == len(levels) // 2:
                     gallery.append({
@@ -357,6 +383,8 @@ def run_part3(
                         "distorted": distorted_rgb,
                         "restored": restored_rgb,
                     })
+
+            flush_detection_batch()
 
             seg_rest_summary, seg_rest_classes = seg_rest.results()
             det_rest_summary, det_rest_classes = evaluate_detections(pred_rest, ground_truth)
@@ -507,6 +535,8 @@ def run_part3(
         "variants": summaries,
     })
     write_json(output / "restoration_manifest.json", {
+        "complete": True,
+        "completed_variants": len(summaries),
         "scope": "Part 3 restoration methodology and reproducibility manifest",
         "recipe_version": RESTORATION_RECIPE_VERSION,
         "detection_evaluator_version": DETECTION_EVALUATOR_VERSION,
@@ -528,6 +558,7 @@ def run_part3(
             "software_versions": _software_versions(),
         },
         "methods": RESTORATION_METHODS,
+        "output_strengths": RESTORATION_OUTPUT_STRENGTH,
         "parameters_by_variant": [
             {
                 "distortion": name,

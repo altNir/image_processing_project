@@ -10,7 +10,17 @@ from cityscapes_project.methods.distortions import motion_blur_kernel
 from cityscapes_project.utils.dependencies import cv2_module
 
 
-RESTORATION_RECIPE_VERSION = 3
+RESTORATION_RECIPE_VERSION = 4
+
+# Family-level output strengths are deliberately fixed and severity-independent.
+# Recipe v4 freezes the two conservative values selected on official Cityscapes
+# train and accepted on disjoint train cities with task-level guardrails.
+RESTORATION_OUTPUT_STRENGTH: dict[str, float] = {
+    "GaussNoise": 0.70,
+    "SevereJPEG": 0.70,
+    "LowLight": 1.0,
+    "MotionBlur": 1.0,
+}
 
 RESTORATION_METHODS: dict[str, dict[str, Any]] = {
     "GaussNoise": {
@@ -262,12 +272,44 @@ def restore_image_with_metadata(
         restored = restore_motion_blur(image_rgb, int(level))
     else:
         raise KeyError(f"No restoration is registered for {distortion_name}")
+    output_strength = float(RESTORATION_OUTPUT_STRENGTH[distortion_name])
+    if output_strength < 1.0:
+        cv2 = cv2_module()
+        restored = cv2.addWeighted(
+            restored, output_strength, np.asarray(image_rgb, dtype=np.uint8),
+            1.0 - output_strength, 0.0,
+        )
     metadata = {
         "recipe_version": RESTORATION_RECIPE_VERSION,
         **RESTORATION_METHODS[distortion_name],
-        "parameters": parameters,
+        "parameters": {**parameters, "output_strength": output_strength},
     }
     return restored, metadata
+
+
+def restore_image_at_strength(
+    image_rgb: np.ndarray, distortion_name: str, level: float, output_strength: float
+) -> np.ndarray:
+    """Evaluate one fixed family-level restoration strength for train-only tuning."""
+
+    if not 0.0 < output_strength <= 1.0:
+        raise ValueError("output_strength must be in (0, 1]")
+    if distortion_name == "GaussNoise":
+        restored = restore_gaussian_noise(image_rgb, float(level))
+    elif distortion_name == "SevereJPEG":
+        restored = restore_jpeg(image_rgb, float(level))
+    elif distortion_name == "LowLight":
+        restored = restore_low_light(image_rgb, float(level))
+    elif distortion_name == "MotionBlur":
+        restored = restore_motion_blur(image_rgb, int(level))
+    else:
+        raise KeyError(f"No restoration is registered for {distortion_name}")
+    if output_strength == 1.0:
+        return restored
+    return cv2_module().addWeighted(
+        restored, float(output_strength), np.asarray(image_rgb, dtype=np.uint8),
+        1.0 - float(output_strength), 0.0,
+    )
 
 
 def restore_image(image_rgb: np.ndarray, distortion_name: str, level: float) -> np.ndarray:

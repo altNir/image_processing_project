@@ -1,0 +1,80 @@
+{
+  "complete": true,
+  "accepted": true,
+  "scope": "unseen-train-city downstream confirmation",
+  "development_cities": [
+    "darmstadt",
+    "krefeld",
+    "monchengladbach",
+    "ulm"
+  ],
+  "confirmation_cities": [
+    "aachen",
+    "bochum"
+  ],
+  "sample_count": 12,
+  "sample_ids": [
+    "aachen_000000_000019",
+    "aachen_000022_000019",
+    "aachen_000044_000019",
+    "aachen_000066_000019",
+    "aachen_000088_000019",
+    "aachen_000110_000019",
+    "aachen_000132_000019",
+    "aachen_000154_000019",
+    "bochum_000000_000885",
+    "bochum_000000_008804",
+    "bochum_000000_018195",
+    "bochum_000000_025833"
+  ],
+  "guardrail": "selected-minus-v3 mean segmentation and detection >= -0.005",
+  "recommendations": {
+    "GaussNoise": 0.7,
+    "SevereJPEG": 0.7,
+    "LowLight": 1.0,
+    "MotionBlur": 1.0
+  },
+  "family_summary": [
+    {
+      "distortion": "GaussNoise",
+      "output_strength": 0.7,
+      "mean_seg_change_vs_v3": 0.002349740091080832,
+      "mean_detection_change_vs_v3": -0.0007313800137861787,
+      "mean_psnr_gain_vs_distorted": 1.7660675457888835,
+      "mean_ssim_gain_vs_distorted": 0.07242069393396378,
+      "mean_orb_gain_vs_distorted": -0.01629166666666666,
+      "mean_canny_gain_vs_distorted": 0.009491091733280393
+    },
+    {
+      "distortion": "SevereJPEG",
+      "output_strength": 0.7,
+      "mean_seg_change_vs_v3": -0.0008706431967228534,
+      "mean_detection_change_vs_v3": 0.000991940995096799,
+      "mean_psnr_gain_vs_distorted": 0.26031701601497115,
+      "mean_ssim_gain_vs_distorted": 0.009319217006365458,
+      "mean_orb_gain_vs_distorted": -0.002083333333333333,
+      "mean_canny_gain_vs_distorted": -0.008126475491904272
+    },
+    {
+      "distortion": "LowLight",
+      "output_strength": 1.0,
+      "mean_seg_change_vs_v3": 0.0,
+      "mean_detection_change_vs_v3": 0.0,
+      "mean_psnr_gain_vs_distorted": 7.968019413693052,
+      "mean_ssim_gain_vs_distorted": 0.34572678357362746,
+      "mean_orb_gain_vs_distorted": -0.08629166666666668,
+      "mean_canny_gain_vs_distorted": 0.33986124680004304
+    },
+    {
+      "distortion": "MotionBlur",
+      "output_strength": 1.0,
+      "mean_seg_change_vs_v3": 0.0,
+      "mean_detection_change_vs_v3": 0.0,
+      "mean_psnr_gain_vs_distorted": 2.2246740404769296,
+      "mean_ssim_gain_vs_distorted": 0.017673152685165405,
+      "mean_orb_gain_vs_distorted": 0.14716666666666664,
+      "mean_canny_gain_vs_distorted": 0.13425478656109974
+    }
+  ],
+  "elapsed_seconds": 390.41845770000145
+}

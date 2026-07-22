@@ -1,0 +1,493 @@
+{
+  "complete": true,
+  "completed_variants": 20,
+  "scope": "Part 3 restoration methodology and reproducibility manifest",
+  "recipe_version": 4,
+  "detection_evaluator_version": 2,
+  "dataset_root": "C:\\Users\\Arikt\\Desktop\\mashupES\\image_processing_project\\data\\cityscapes_official",
+  "seed": 7,
+  "split": "val",
+  "sample_count": 125,
+  "sample_ids": [
+    "frankfurt_000000_009688",
+    "frankfurt_000000_009969",
+    "frankfurt_000000_011007",
+    "frankfurt_000000_011074",
+    "frankfurt_000000_011461",
+    "frankfurt_000000_012868",
+    "frankfurt_000000_013067",
+    "frankfurt_000000_013240",
+    "frankfurt_000000_013382",
+    "frankfurt_000000_015389",
+    "frankfurt_000000_016005",
+    "frankfurt_000000_017228",
+    "frankfurt_000000_018797",
+    "frankfurt_000000_020321",
+    "frankfurt_000000_021667",
+    "frankfurt_000000_021879",
+    "frankfurt_000000_022254",
+    "frankfurt_000000_022797",
+    "frankfurt_000001_002512",
+    "frankfurt_000001_005184",
+    "frankfurt_000001_005898",
+    "frankfurt_000001_007973",
+    "frankfurt_000001_009854",
+    "frankfurt_000001_010830",
+    "frankfurt_000001_012738",
+    "frankfurt_000001_014741",
+    "frankfurt_000001_016029",
+    "frankfurt_000001_019969",
+    "frankfurt_000001_021406",
+    "frankfurt_000001_023769",
+    "frankfurt_000001_024927",
+    "frankfurt_000001_029086",
+    "frankfurt_000001_029236",
+    "frankfurt_000001_030310",
+    "frankfurt_000001_035144",
+    "frankfurt_000001_040732",
+    "frankfurt_000001_041074",
+    "frankfurt_000001_042384",
+    "frankfurt_000001_044227",
+    "frankfurt_000001_044658",
+    "frankfurt_000001_046779",
+    "frankfurt_000001_049698",
+    "frankfurt_000001_049770",
+    "frankfurt_000001_051737",
+    "frankfurt_000001_054219",
+    "frankfurt_000001_054640",
+    "frankfurt_000001_055172",
+    "frankfurt_000001_058504",
+    "frankfurt_000001_058914",
+    "frankfurt_000001_062250",
+    "frankfurt_000001_062396",
+    "frankfurt_000001_062653",
+    "frankfurt_000001_062793",
+    "frankfurt_000001_064651",
+    "frankfurt_000001_066438",
+    "frankfurt_000001_067092",
+    "frankfurt_000001_067178",
+    "frankfurt_000001_068208",
+    "frankfurt_000001_070099",
+    "frankfurt_000001_073911",
+    "frankfurt_000001_076502",
+    "frankfurt_000001_077092",
+    "frankfurt_000001_080091",
+    "frankfurt_000001_082087",
+    "lindau_000001_000019",
+    "lindau_000005_000019",
+    "lindau_000007_000019",
+    "lindau_000009_000019",
+    "lindau_000013_000019",
+    "lindau_000015_000019",
+    "lindau_000018_000019",
+    "lindau_000019_000019",
+    "lindau_000021_000019",
+    "lindau_000022_000019",
+    "lindau_000025_000019",
+    "lindau_000026_000019",
+    "lindau_000027_000019",
+    "lindau_000028_000019",
+    "lindau_000029_000019",
+    "lindau_000030_000019",
+    "lindau_000031_000019",
+    "lindau_000032_000019",
+    "lindau_000037_000019",
+    "lindau_000044_000019",
+    "lindau_000049_000019",
+    "lindau_000054_000019",
+    "lindau_000055_000019",
+    "munster_000001_000019",
+    "munster_000007_000019",
+    "munster_000014_000019",
+    "munster_000016_000019",
+    "munster_000022_000019",
+    "munster_000023_000019",
+    "munster_000029_000019",
+    "munster_000030_000019",
+    "munster_000031_000019",
+    "munster_000038_000019",
+    "munster_000047_000019",
+    "munster_000061_000019",
+    "munster_000065_000019",
+    "munster_000071_000019",
+    "munster_000073_000019",
+    "munster_000080_000019",
+    "munster_000083_000019",
+    "munster_000091_000019",
+    "munster_000094_000019",
+    "munster_000095_000019",
+    "munster_000097_000019",
+    "munster_000100_000019",
+    "munster_000105_000019",
+    "munster_000113_000019",
+    "munster_000120_000019",
+    "munster_000125_000019",
+    "munster_000126_000019",
+    "munster_000129_000019",
+    "munster_000133_000019",
+    "munster_000138_000019",
+    "munster_000139_000019",
+    "munster_000148_000019",
+    "munster_000153_000019",
+    "munster_000154_000019",
+    "munster_000159_000019",
+    "munster_000162_000019",
+    "munster_000167_000019",
+    "munster_000171_000019"
+  ],
+  "distortion_levels": {
+    "GaussNoise": [
+      5.0,
+      10.0,
+      20.0,
+      35.0,
+      50.0
+    ],
+    "SevereJPEG": [
+      80.0,
+      60.0,
+      40.0,
+      20.0,
+      5.0
+    ],
+    "LowLight": [
+      0.8,
+      0.6,
+      0.4,
+      0.25,
+      0.1
+    ],
+    "MotionBlur": [
+      3.0,
+      5.0,
+      9.0,
+      15.0,
+      25.0
+    ]
+  },
+  "distortion_seed_rule": "FNV-1a seed from run seed, sample ID, distortion, and level index",
+  "models": {
+    "detection": "yolov8n.pt",
+    "segmentation": "nvidia/segformer-b0-finetuned-cityscapes-1024-1024",
+    "yolo_evaluation_confidence": 0.001
+  },
+  "execution": {
+    "device": "cuda:0",
+    "half_precision_requested": true,
+    "software_versions": {
+      "python": "3.12.13",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "numpy": "2.4.4",
+      "Pillow": "12.2.0",
+      "opencv-python": "5.0.0.93",
+      "torch": "2.13.0+cu130",
+      "transformers": "5.14.1",
+      "ultralytics": "8.4.103"
+    }
+  },
+  "methods": {
+    "GaussNoise": {
+      "method": "severity-aware non-local means with edge-preserving residual cleanup",
+      "reference": "Buades, Coll and Morel, CVPR 2005",
+      "doi": "https://doi.org/10.1109/CVPR.2005.38"
+    },
+    "SevereJPEG": {
+      "method": "8x8 boundary-aware luminance deblocking",
+      "reference": "signal-adaptive JPEG deblocking principles",
+      "doi": "https://doi.org/10.1109/83.661000"
+    },
+    "LowLight": {
+      "method": "exposure-compensating gamma lift followed by luminance CLAHE",
+      "reference": "contrast-limited adaptive histogram equalization",
+      "doi": "https://doi.org/10.1016/0734-189X(87)90186-X"
+    },
+    "MotionBlur": {
+      "method": "known-PSF Tikhonov deconvolution with Laplacian regularization",
+      "reference": "regularized linear inverse restoration",
+      "doi": "https://doi.org/10.2307/2006224"
+    }
+  },
+  "output_strengths": {
+    "GaussNoise": 0.7,
+    "SevereJPEG": 0.7,
+    "LowLight": 1.0,
+    "MotionBlur": 1.0
+  },
+  "parameters_by_variant": [
+    {
+      "distortion": "GaussNoise",
+      "level_index": 0,
+      "level": 5.0,
+      "parameters": {
+        "h_luminance": 2.3000000000000003,
+        "h_color": 2.0,
+        "template_window": 7,
+        "search_window": 21,
+        "blend": 0.3,
+        "bilateral_sigma": 0.0
+      }
+    },
+    {
+      "distortion": "GaussNoise",
+      "level_index": 1,
+      "level": 10.0,
+      "parameters": {
+        "h_luminance": 4.6000000000000005,
+        "h_color": 4.0,
+        "template_window": 7,
+        "search_window": 21,
+        "blend": 0.37222222222222223,
+        "bilateral_sigma": 0.0
+      }
+    },
+    {
+      "distortion": "GaussNoise",
+      "level_index": 2,
+      "level": 20.0,
+      "parameters": {
+        "h_luminance": 9.200000000000001,
+        "h_color": 8.0,
+        "template_window": 7,
+        "search_window": 21,
+        "blend": 0.5166666666666666,
+        "bilateral_sigma": 0.0
+      }
+    },
+    {
+      "distortion": "GaussNoise",
+      "level_index": 3,
+      "level": 35.0,
+      "parameters": {
+        "h_luminance": 16.1,
+        "h_color": 14.0,
+        "template_window": 7,
+        "search_window": 21,
+        "blend": 0.7333333333333334,
+        "bilateral_sigma": 18.5
+      }
+    },
+    {
+      "distortion": "GaussNoise",
+      "level_index": 4,
+      "level": 50.0,
+      "parameters": {
+        "h_luminance": 23.0,
+        "h_color": 20.0,
+        "template_window": 7,
+        "search_window": 21,
+        "blend": 0.95,
+        "bilateral_sigma": 23.0
+      }
+    },
+    {
+      "distortion": "SevereJPEG",
+      "level_index": 0,
+      "level": 80.0,
+      "parameters": {
+        "block_size": 8,
+        "boundary_radius": 1,
+        "diameter": 5,
+        "sigma_color": 8.0,
+        "sigma_space": 4.0,
+        "boundary_blend": 0.15,
+        "global_blend": 0.01
+      }
+    },
+    {
+      "distortion": "SevereJPEG",
+      "level_index": 1,
+      "level": 60.0,
+      "parameters": {
+        "block_size": 8,
+        "boundary_radius": 2,
+        "diameter": 7,
+        "sigma_color": 17.6,
+        "sigma_space": 7.2,
+        "boundary_blend": 0.1532869135802469,
+        "global_blend": 0.010021575637860082
+      }
+    },
+    {
+      "distortion": "SevereJPEG",
+      "level_index": 2,
+      "level": 40.0,
+      "parameters": {
+        "block_size": 8,
+        "boundary_radius": 2,
+        "diameter": 7,
+        "sigma_color": 27.2,
+        "sigma_space": 10.4,
+        "boundary_blend": 0.2025906172839506,
+        "global_blend": 0.011380840823045267
+      }
+    },
+    {
+      "distortion": "SevereJPEG",
+      "level_index": 3,
+      "level": 20.0,
+      "parameters": {
+        "block_size": 8,
+        "boundary_radius": 3,
+        "diameter": 9,
+        "sigma_color": 36.8,
+        "sigma_space": 13.600000000000001,
+        "boundary_blend": 0.41624000000000005,
+        "global_blend": 0.025728640000000004
+      }
+    },
+    {
+      "distortion": "SevereJPEG",
+      "level_index": 4,
+      "level": 5.0,
+      "parameters": {
+        "block_size": 8,
+        "boundary_radius": 3,
+        "diameter": 9,
+        "sigma_color": 44.0,
+        "sigma_space": 16.0,
+        "boundary_blend": 0.8,
+        "global_blend": 0.06999999999999999
+      }
+    },
+    {
+      "distortion": "LowLight",
+      "level_index": 0,
+      "level": 0.8,
+      "parameters": {
+        "gamma": 0.88,
+        "clahe_clip": 1.15,
+        "clahe_grid": 8,
+        "blend": 0.42
+      }
+    },
+    {
+      "distortion": "LowLight",
+      "level_index": 1,
+      "level": 0.6,
+      "parameters": {
+        "gamma": 0.7771428571428571,
+        "clahe_clip": 1.592857142857143,
+        "clahe_grid": 8,
+        "blend": 0.562857142857143
+      }
+    },
+    {
+      "distortion": "LowLight",
+      "level_index": 2,
+      "level": 0.4,
+      "parameters": {
+        "gamma": 0.6742857142857143,
+        "clahe_clip": 2.0357142857142856,
+        "clahe_grid": 8,
+        "blend": 0.7057142857142857
+      }
+    },
+    {
+      "distortion": "LowLight",
+      "level_index": 3,
+      "level": 0.25,
+      "parameters": {
+        "gamma": 0.5971428571428572,
+        "clahe_clip": 2.367857142857143,
+        "clahe_grid": 8,
+        "blend": 0.812857142857143
+      }
+    },
+    {
+      "distortion": "LowLight",
+      "level_index": 4,
+      "level": 0.1,
+      "parameters": {
+        "gamma": 0.52,
+        "clahe_clip": 2.7,
+        "clahe_grid": 8,
+        "blend": 0.9199999999999999
+      }
+    },
+    {
+      "distortion": "MotionBlur",
+      "level_index": 0,
+      "level": 3.0,
+      "parameters": {
+        "kernel_size": 3,
+        "regularization": 0.0015,
+        "blend": 0.45,
+        "padding": 12
+      }
+    },
+    {
+      "distortion": "MotionBlur",
+      "level_index": 1,
+      "level": 5.0,
+      "parameters": {
+        "kernel_size": 5,
+        "regularization": 0.0039,
+        "blend": 0.4916666666666667,
+        "padding": 12
+      }
+    },
+    {
+      "distortion": "MotionBlur",
+      "level_index": 2,
+      "level": 9.0,
+      "parameters": {
+        "kernel_size": 9,
+        "regularization": 0.0231,
+        "blend": 0.575,
+        "padding": 18
+      }
+    },
+    {
+      "distortion": "MotionBlur",
+      "level_index": 3,
+      "level": 15.0,
+      "parameters": {
+        "kernel_size": 15,
+        "regularization": 0.08789999999999999,
+        "blend": 0.7,
+        "padding": 30
+      }
+    },
+    {
+      "distortion": "MotionBlur",
+      "level_index": 4,
+      "level": 25.0,
+      "parameters": {
+        "kernel_size": 25,
+        "regularization": 0.2919,
+        "blend": 0.4,
+        "padding": 50
+      }
+    }
+  ],
+  "part2_cache_provenance": {
+    "source": "outputs_part3_v4_125_official\\part2",
+    "legacy_completion_inferred": true,
+    "reused_metrics": [
+      "orb_match_retention",
+      "canny_f1",
+      "segmentation"
+    ],
+    "recomputed_metrics": [
+      "snr",
+      "psnr",
+      "ssim",
+      "mae",
+      "detection"
+    ]
+  },
+  "statistical_protocol": {
+    "paired_unit": "Cityscapes image",
+    "interval": "percentile bootstrap of paired mean improvement",
+    "bootstrap_resamples": 1000,
+    "confidence_level": 0.95,
+    "non_finite_pairs": "excluded per metric",
+    "positive_delta": "improvement (MAE sign is inverted)"
+  },
+  "quality_metric_protocol": {
+    "snr": "RGB signal power divided by RGB error power, in dB",
+    "psnr": "RGB MSE with 8-bit peak value, in dB",
+    "ssim": "luminance SSIM, 11x11 Gaussian window, sigma 1.5",
+    "mae": "mean absolute RGB error in 0-255 intensity units"
+  }
+}

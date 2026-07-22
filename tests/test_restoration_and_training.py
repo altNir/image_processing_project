@@ -13,7 +13,12 @@ import cityscapes_project.pipelines.parts34 as project
 from cityscapes_project.config import Parts34Config
 from cityscapes_project.pipelines.part4_final import _mean_t_interval_95
 from cityscapes_project.methods.distortions import apply_aug, compute_snr
-from cityscapes_project.methods.restoration import restoration_parameters, restore_image
+from cityscapes_project.methods.restoration import (
+    restoration_parameters,
+    restore_image,
+    restore_image_at_strength,
+    restore_image_with_metadata,
+)
 from cityscapes_project.methods.quality import compute_mae, compute_psnr, compute_ssim
 from cityscapes_project.utils.statistics import paired_bootstrap
 from cityscapes_project.pipelines.parts34 import (
@@ -46,6 +51,24 @@ class RestorationTests(unittest.TestCase):
     def test_unknown_restoration_is_rejected(self) -> None:
         with self.assertRaises(KeyError):
             restore_image(self.image, "Unknown", 1.0)
+
+    def test_output_strength_is_global_bounded_and_auditable(self) -> None:
+        distorted = apply_aug(Image.fromarray(self.image), "LowLight", 0.4, seed=9)
+        full = restore_image_at_strength(distorted, "LowLight", 0.4, 1.0)
+        conservative = restore_image_at_strength(distorted, "LowLight", 0.4, 0.7)
+        dispatched, metadata = restore_image_with_metadata(distorted, "LowLight", 0.4)
+        self.assertTrue(np.array_equal(full, dispatched))
+        self.assertEqual(metadata["parameters"]["output_strength"], 1.0)
+        self.assertLessEqual(compute_mae(distorted, conservative), compute_mae(distorted, full))
+        noisy = apply_aug(Image.fromarray(self.image), "GaussNoise", 20.0, seed=9)
+        dispatched_noise, noise_metadata = restore_image_with_metadata(
+            noisy, "GaussNoise", 20.0
+        )
+        expected_noise = restore_image_at_strength(noisy, "GaussNoise", 20.0, 0.7)
+        self.assertTrue(np.array_equal(dispatched_noise, expected_noise))
+        self.assertEqual(noise_metadata["parameters"]["output_strength"], 0.7)
+        with self.assertRaises(ValueError):
+            restore_image_at_strength(distorted, "LowLight", 0.4, 0.0)
 
     def test_restoration_strength_tracks_distortion_severity(self) -> None:
         mild_noise = restoration_parameters("GaussNoise", 5.0)
@@ -288,13 +311,16 @@ class Part3OrchestrationTests(unittest.TestCase):
                 "inlier_ratio": 0.875,
             }
 
-            def fake_yolo(_image, _model, image_id, *_args, **_kwargs):
-                return [Detection(image_id, "car", (8.0, 5.0, 25.0, 18.0), score=0.9)]
+            def fake_yolo_batch(_images, _model, image_ids, *_args, **_kwargs):
+                return [
+                    Detection(image_id, "car", (8.0, 5.0, 25.0, 18.0), score=0.9)
+                    for image_id in image_ids
+                ]
 
             with (
                 patch.object(project, "measure_orb_matching", return_value=fake_orb),
                 patch.object(project, "predict_segmentation", return_value=label.astype(np.int32)),
-                patch.object(project, "yolo_detections", side_effect=fake_yolo),
+                patch.object(project, "batched_model_detections", side_effect=fake_yolo_batch),
                 patch.object(project, "save_restoration_gallery"),
                 patch.object(project, "save_restoration_plot"),
                 patch.object(project, "save_restoration_quality_plot"),

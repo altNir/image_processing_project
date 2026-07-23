@@ -449,5 +449,5 @@ They cover Cityscapes discovery and label mapping, deterministic distortions, se
 
 ## AI Disclosure
 
-AI tools were used to improve code documentation, assist with debugging and code refinement, and organize the repository file and output diagrams in this README. Approximately 80% to 85% of the code was implemented solely by the team, with AI used as a supporting development and editing tool.
+Codex was used to improve code documentation, assist with debugging and tweaks, and organize the repository file and output diagrams in this README. Approximately 80% to 85% of the code was implemented solely by us.
 

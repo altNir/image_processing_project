@@ -4,7 +4,7 @@ In the project we study how classical and deep learning vision methods behave wh
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
-## Project overview
+## Overview
 
 The project has three experimental stages containing four numbered parts:
 

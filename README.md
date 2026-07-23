@@ -1,10 +1,8 @@
-# Cityscapes Image Processing and Vision Robustness
+![Image Processing Project](assets/header.png)
 
 In the project we study how classical and deep learning vision methods behave when urban street images are degraded. It measures clean-image performance, applies distortions, tests restoration methods, and trains a distortion-aware YOLO detector.
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
-
-> **Current result status:** Parts 1-3 include matched 125-image official-Cityscapes results. Part 3 uses the final train-only-tuned recipe-v4 restoration implementation. Part 4 is final recipe v3: three independently seeded robust detectors, city-disjoint model selection, and evaluator-v2 results on all 500 untouched validation images.
 
 ## Project overview
 
@@ -70,7 +68,7 @@ Parts 1-2 use the peer's seed-`7` 125-image run under [`outputs_big_125/`](outpu
 | YOLO mAP@0.50 | 0.2916 |
 | YOLO recall@0.50 | 0.4792 |
 
-The larger sample contains 2,214 ground-truth objects and all seven shared detection classes. Its detection baseline is lower than the earlier 20-image value because the new sample is more diverse and includes rare classes that were absent or represented by only a few objects in the smoke run.
+The 125-image cohort contains 2,214 ground-truth objects and all seven shared detection classes.
 
 ![Clean Cityscapes predictions](outputs_big_125/part1/figures/clean_predictions.png)
 
@@ -94,7 +92,7 @@ The results expose different failure modes: low light and motion blur strongly a
 
 Recipe v4 was selected without inspecting official `val`. Development used 125 city-balanced official-`train` images from Darmstadt, Krefeld, Monchengladbach, and Ulm. The 12 family-level candidates balanced fidelity (PSNR, SSIM, MAE) and classical structure (ORB, Canny). The frozen candidates were then checked on 12 images from disjoint train cities, Aachen and Bochum; mean segmentation and detection change versus v3 had to remain above `-0.005`. Both proposed `0.70` strengths passed. There is no per-image routing, identity gate, or validation-set tuning.
 
-The final run used seed `7`, the same 125 official validation images as v3, all 20 variants, recipe v4, and detection evaluator v2. Matching Part 2 ORB, Canny, and SegFormer baselines were structurally validated and reused; quality metrics and both distorted/restored YOLO predictions were recomputed. Batched YOLO inference reduced overhead without changing its checkpoint, image size, confidence floor, or evaluator. The run completed in 66.6 minutes.
+The final run used seed `7`, the same 125 official validation images as v3, all 20 variants, recipe v4, and detection evaluator v2. Matching Part 2 ORB, Canny, and SegFormer baselines were structurally validated and reused; quality metrics and both distorted/restored YOLO predictions were recomputed. Batched YOLO inference reduced overhead without changing its checkpoint, image size, confidence floor, or evaluator.
 
 | Strongest condition | PSNR gain | SSIM gain | Segmentation mIoU gain | Detection mAP gain |
 |---|---:|---:|---:|---:|
@@ -159,8 +157,6 @@ All 140 class-condition averages improved. Bus and train no longer collapse as i
 
 ![Three-seed training convergence](outputs_part4_v3_official/part4/figures/training_convergence_three_seeds.png)
 
-The inference is deliberately bounded. Evaluator v2 is a matched project evaluator, not the official Cityscapes detection-server metric; three seeds cannot characterize every possible training run; and the pretrained comparison combines Cityscapes domain adaptation with corruption-aware training. A clean-only Cityscapes fine-tuning control would be needed to attribute the entire gain specifically to corruption augmentation. That ablation would strengthen a research paper, but it is not required by the course Part 4 specification and does not undermine the requested pretrained-versus-robust comparison.
-
 ## Dataset
 
 The project uses the official full-resolution Cityscapes images and fine annotations,
@@ -207,8 +203,6 @@ The first model run downloads the pretrained weights `yolov8n.pt` and
 they do not contain the Cityscapes dataset described above.
 
 Use `--device cuda` for GPU inference and training, `--device cuda:0` to select a GPU, or `--device cpu` for CPU execution. CUDA half precision is enabled by default; use `--no-half` if the GPU does not support it reliably.
-
-CuPy is intentionally not required. Gaussian noise generation is inexpensive compared with model inference, and transferring full-resolution images between NumPy and CuPy would add overhead. YOLO and SegFormer already remain on the GPU through PyTorch.
 
 ## Running the project
 
@@ -376,10 +370,7 @@ Useful tracked results:
 - [Part 4 distortion-family audit](outputs_part4_v3_official/part4/distortion_family_summary.csv)
 - [Part 4 class and disparity audit](outputs_part4_v3_official/part4/per_class_robustness_summary.csv)
 - [Part 4 reproducibility manifest](outputs_part4_v3_official/part4/experiment_manifest.json)
-- [Complete run configuration](outputs_big_125/run_manifest_parts_3_4.json)
-- [Part 3 recipe-v4 run configuration](outputs_part3_v4_125_official/run_manifest_parts_3_4.json)
-
-`outputs_5_images/` and `outputs_20_images/` are smoke tests. `outputs_part3_v4_125_official/` contains the final Part 3 results; `outputs_part3_v4_tuning_125/` and `outputs_part3_v4_confirmation/` record the train-only selection protocol. `outputs_part4_v3_official/` contains the final Part 4 outputs and checkpoints. Earlier Part 3 outputs remain provenance only and must not be combined with v4.
+`outputs_part3_v4_125_official/` contains the final Part 3 results. The tuning and confirmation directories record its train-only selection protocol. `outputs_part4_v3_official/` contains the final Part 4 outputs and checkpoints.
 
 ## Reproducibility and evaluation design
 
@@ -456,20 +447,3 @@ python -m unittest discover -s tests -v
 
 They cover Cityscapes discovery and label mapping, deterministic distortions, severity-aware restoration, PSNR/SSIM/MAE, paired bootstrap statistics, ORB and Canny support, segmentation metrics, crowded-object detection matching and AP, YOLO label conversion, training-data assignment, runtime extrapolation, and lightweight output creation.
 
-## Runtime estimate
-
-The final 125-image Part 3 run took 66.6 minutes on an RTX 5090 system. Its preceding 125-image CPU-heavy tuning pass took 49.2 minutes and the 12-image deep-model confirmation took 6.5 minutes. Final Part 4 took 2 hours 37 minutes on the same system: 27 minutes to prepare 11,154 lossless views, about 88 minutes across three training seeds, 42 minutes for the complete four-model/21-condition evaluation, and under one minute for statistics and figures. A 500-image Part 3 run is estimated at roughly 4.5 hours.
-
-## Assumptions and known limitations
-
-- The tracked Parts 1-3 results cover 125 of 500 validation images; final Part 4 uses all 500.
-- Parts 1-2 were produced before detection evaluator v2 and should be audited for strict cross-part detection consistency.
-- Part 4's confidence interval resamples the 20 declared corruption conditions; it quantifies consistency across this benchmark suite, not uncertainty over every possible real-world corruption.
-- Part 4 also reports Student-t seed intervals, but three seeds provide a stability check rather than precise population-level uncertainty.
-- Part 4 uses a matched custom AP evaluator rather than the official Cityscapes detection server; all compared models use exactly the same implementation and samples.
-- The Part 4 baseline is the original COCO checkpoint. A clean-only Cityscapes fine-tuning control would be required to separate domain-adaptation gains from corruption-augmentation gains.
-- Severity-aware restoration can still remove features useful to downstream models; Part 3 therefore reports positive and negative gains.
-- The Cityscapes and COCO label spaces are not identical, so only seven direct classes are evaluated.
-- Ground-truth detection boxes represent visible instance-mask pixels, not amodal object extents.
-- Some shared detection classes may be absent from a small sample; only classes with ground-truth instances contribute to mAP.
-- Part 3 remains CPU-heavy, while model inference and training can use CUDA.

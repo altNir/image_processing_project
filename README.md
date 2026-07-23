@@ -447,3 +447,7 @@ python -m unittest discover -s tests -v
 
 They cover Cityscapes discovery and label mapping, deterministic distortions, severity-aware restoration, PSNR/SSIM/MAE, paired bootstrap statistics, ORB and Canny support, segmentation metrics, crowded-object detection matching and AP, YOLO label conversion, training-data assignment, runtime extrapolation, and lightweight output creation.
 
+## AI Disclosure
+
+AI tools were used to improve code documentation, assist with debugging and code refinement, and organize the repository file and output diagrams in this README. Approximately 80% to 85% of the code was implemented solely by the team, with AI used as a supporting development and editing tool.
+

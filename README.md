@@ -1,6 +1,6 @@
 # Cityscapes Image Processing and Vision Robustness
 
-This course project studies how classical and deep-learning vision methods behave when urban street images are degraded. It measures clean-image performance, applies controlled distortions, tests restoration methods, and trains a distortion-aware YOLO detector.
+In the project we study how classical and deep learning vision methods behave when urban street images are degraded. It measures clean-image performance, applies distortions, tests restoration methods, and trains a distortion-aware YOLO detector.
 
 The implementation uses the Cityscapes dataset, deterministic experiments, ground-truth semantic and instance annotations, and reproducible CSV/JSON outputs. GPU acceleration is used for YOLO and SegFormer through PyTorch; the classical OpenCV pipeline remains on the CPU.
 
